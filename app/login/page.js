@@ -1,75 +1,98 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useForm } from 'react-hook-form';
 import Link from 'next/link';
 import { FaArrowLeft, FaEnvelope, FaLock, FaEye, FaEyeSlash } from 'react-icons/fa';
-import { useAuth } from '@/context/AuthContext';
+import { createClient } from '@/utils/supabase/client';
 
 export default function Login() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirectTo') || '/swipe';
   
-  const { signIn, loading: authLoading, isAuthenticated } = useAuth();
+  // State management
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  
-  const { 
-    register, 
-    handleSubmit, 
-    formState: { errors }
-  } = useForm();
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
-  // Weiterleitung, wenn der Benutzer bereits angemeldet ist
-  useEffect(() => {
-    if (isAuthenticated) {
-      router.push(redirectTo);
+  // Form validation logic
+  const validateForm = () => {
+    let isValid = true;
+    setEmailError('');
+    setPasswordError('');
+    
+    if (!email) {
+      setEmailError('E-Mail ist erforderlich');
+      isValid = false;
+    } else if (!/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(email)) {
+      setEmailError('Ungültige E-Mail-Adresse');
+      isValid = false;
     }
-  }, [isAuthenticated, router, redirectTo]);
-
-  const onSubmit = async (data) => {
+    
+    if (!password) {
+      setPasswordError('Passwort ist erforderlich');
+      isValid = false;
+    }
+    
+    return isValid;
+  };
+  
+  // Handle login submission
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    
     try {
-      setLoading(true);
-      setError(null);
+      console.log('Anmeldeversuch für:', email);
       
-      const { success, error, data: authData } = await signIn(data.email, data.password);
+      // Initialize Supabase client
+      const supabase = createClient();
       
-      if (!success) {
-        // Fehlerbehandlung
-        if (error.message.includes('Email not confirmed')) {
-          setError('Deine E-Mail-Adresse wurde noch nicht bestätigt. Bitte überprüfe deinen Posteingang.');
-        } else if (error.message.includes('Invalid login credentials')) {
-          setError('Ungültige Anmeldedaten. Bitte überprüfe deine E-Mail-Adresse und dein Passwort.');
-        } else {
-          setError(`Anmeldung fehlgeschlagen: ${error.message}`);
+      // Sign in with email and password
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      
+      if (signInError) {
+        console.error('Anmeldefehler:', signInError);
+        
+        if (signInError.message.includes('Email not confirmed')) {
+          throw new Error('Deine E-Mail-Adresse wurde noch nicht bestätigt. Bitte überprüfe deinen Posteingang.');
+        } else if (signInError.message.includes('Invalid login credentials')) {
+          throw new Error('Ungültige Anmeldedaten. Bitte überprüfe deine E-Mail-Adresse und dein Passwort.');
         }
-        return;
+        
+        throw new Error(`Anmeldung fehlgeschlagen: ${signInError.message}`);
       }
       
-      // Bei Erfolg zur Swipe-Seite oder zur Umleitungsseite navigieren
-      // Verwende window.location für eine vollständige Seitenaktualisierung
-      console.log('Login erfolgreich, leite weiter zu:', redirectTo);
+      if (!data.session) {
+        throw new Error('Anmeldung erfolgreich, aber keine Sitzung erstellt. Bitte versuche es erneut.');
+      }
+      
+      console.log('Anmeldung erfolgreich, Weiterleitung zu:', redirectTo);
+      
+      // Use direct navigation to ensure page refresh with new auth state
       window.location.href = redirectTo;
       
     } catch (err) {
-      console.error('Unerwarteter Login-Fehler:', err);
-      setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
+      console.error('Fehler bei der Anmeldung:', err);
+      setError(err.message || 'Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
     } finally {
       setLoading(false);
     }
   };
-
-  // Zeige Ladeanzeige, wenn Auth-Provider noch lädt
-  if (authLoading) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-md mx-auto py-8 px-4">
@@ -97,7 +120,7 @@ export default function Login() {
         </div>
       )}
       
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <form onSubmit={handleLogin} className="space-y-4">
         <div>
           <label htmlFor="email" className="block mb-1 font-medium">E-Mail</label>
           <div className="relative">
@@ -109,16 +132,12 @@ export default function Login() {
               type="email"
               className="input pl-10"
               placeholder="beispiel@email.de"
-              {...register('email', { 
-                required: 'E-Mail ist erforderlich',
-                pattern: {
-                  value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                  message: 'Ungültige E-Mail-Adresse'
-                }
-              })}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
             />
           </div>
-          {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>}
+          {emailError && <p className="text-red-500 text-sm mt-1">{emailError}</p>}
         </div>
         
         <div>
@@ -132,7 +151,9 @@ export default function Login() {
               type={showPassword ? "text" : "password"}
               className="input pl-10 pr-10"
               placeholder="Dein Passwort"
-              {...register('password', { required: 'Passwort ist erforderlich' })}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
             />
             <button
               type="button"
@@ -142,7 +163,7 @@ export default function Login() {
               {showPassword ? <FaEyeSlash className="text-gray-400" /> : <FaEye className="text-gray-400" />}
             </button>
           </div>
-          {errors.password && <p className="text-red-500 text-sm mt-1">{errors.password.message}</p>}
+          {passwordError && <p className="text-red-500 text-sm mt-1">{passwordError}</p>}
         </div>
         
         <div className="flex justify-end">
@@ -152,9 +173,9 @@ export default function Login() {
         <button
           type="submit"
           className="button w-full mt-2"
-          disabled={loading || authLoading}
+          disabled={loading}
         >
-          {loading || authLoading ? (
+          {loading ? (
             <div className="flex items-center justify-center">
               <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
               Anmeldung...
