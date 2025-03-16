@@ -1,12 +1,13 @@
+// app/swipe/page.js - Alternative ohne react-tinder-card
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { getUniversityRecommendations } from '@/lib/recommendation';
 import { FaHeart, FaTimes, FaUniversity, FaInfoCircle, FaStar, FaArrowLeft } from 'react-icons/fa';
 import Link from 'next/link';
 import { useSwipeable } from 'react-swipeable';
+import Image from 'next/image';
 
 export default function Swipe() {
   const router = useRouter();
@@ -15,33 +16,9 @@ export default function Swipe() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
-  const [swipeDirection, setSwipeDirection] = useState(null);
-  const [swipeStarted, setSwipeStarted] = useState(false);
+  const [swipeAnimation, setSwipeAnimation] = useState(null);
   const [matchFeedback, setMatchFeedback] = useState(false);
   
-  // CSS Transformationen für Swipe-Animation
-  const getCardStyle = () => {
-    if (!swipeStarted) return {};
-    
-    if (swipeDirection === 'left') {
-      return {
-        transform: 'translateX(-150%) rotate(-30deg)',
-        opacity: 0,
-        transition: 'transform 0.5s, opacity 0.5s'
-      };
-    }
-    
-    if (swipeDirection === 'right') {
-      return {
-        transform: 'translateX(150%) rotate(30deg)',
-        opacity: 0,
-        transition: 'transform 0.5s, opacity 0.5s'
-      };
-    }
-    
-    return {};
-  };
-
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -62,10 +39,53 @@ export default function Swipe() {
     try {
       setLoading(true);
       
-      // Verwende den Empfehlungsalgorithmus, um passende Universitäten zu finden
-      const recommendedUniversities = await getUniversityRecommendations(userId);
+      // Simulierte Daten (in einem echten Projekt würde dies von Supabase kommen)
+      const mockUniversities = [
+        {
+          id: 1,
+          name: "Technische Universität Berlin",
+          location: "Berlin",
+          description: "Die Technische Universität Berlin ist eine der größten technischen Universitäten Deutschlands mit einer langen Tradition.",
+          image_url: "/placeholder-uni-1.jpg",
+          ratings: 4.5,
+          website_url: "https://www.tu-berlin.de",
+          subjects: [
+            { id: 1, name: "Informatik", isUserFavorite: true },
+            { id: 2, name: "Maschinenbau", isUserFavorite: false },
+            { id: 3, name: "Elektrotechnik", isUserFavorite: false }
+          ]
+        },
+        {
+          id: 2,
+          name: "Ludwig-Maximilians-Universität München",
+          location: "München",
+          description: "Die LMU München ist eine der renommiertesten Universitäten Europas mit einem breiten Fächerangebot.",
+          image_url: "/placeholder-uni-2.jpg",
+          ratings: 4.7,
+          website_url: "https://www.lmu.de",
+          subjects: [
+            { id: 4, name: "Medizin", isUserFavorite: false },
+            { id: 5, name: "Psychologie", isUserFavorite: true },
+            { id: 6, name: "Rechtswissenschaften", isUserFavorite: false }
+          ]
+        },
+        {
+          id: 3,
+          name: "Universität Heidelberg",
+          location: "Heidelberg",
+          description: "Die Universität Heidelberg ist die älteste Universität Deutschlands und bekannt für ihre exzellente Forschung.",
+          image_url: "/placeholder-uni-3.jpg",
+          ratings: 4.6,
+          website_url: "https://www.uni-heidelberg.de",
+          subjects: [
+            { id: 7, name: "Physik", isUserFavorite: false },
+            { id: 8, name: "Biologie", isUserFavorite: false },
+            { id: 9, name: "Germanistik", isUserFavorite: true }
+          ]
+        }
+      ];
       
-      setUniversities(recommendedUniversities);
+      setUniversities(mockUniversities);
       setLoading(false);
     } catch (error) {
       console.error('Fehler beim Laden der Daten:', error);
@@ -78,18 +98,13 @@ export default function Swipe() {
       return;
     }
 
-    setSwipeDirection(direction);
-    setSwipeStarted(true);
-
     const currentUni = universities[currentIndex];
+    setSwipeAnimation(direction);
 
     if (direction === 'right') {
       try {
-        // Speichere den Match in der Datenbank
-        await supabase.from('matches').insert({
-          user_id: user.id,
-          university_id: currentUni.id
-        });
+        // In der echten App - speicher den Match in der Datenbank
+        console.log(`Match with university: ${currentUni.name}`);
         
         // Zeige Match-Feedback an
         setMatchFeedback(true);
@@ -104,10 +119,9 @@ export default function Swipe() {
     }
     
     // Animations-Timeout, bevor die Karte wirklich entfernt wird
-    setTimeout(async () => {
+    setTimeout(() => {
       setCurrentIndex(prevIndex => prevIndex + 1);
-      setSwipeDirection(null);
-      setSwipeStarted(false);
+      setSwipeAnimation(null);
       setShowDetails(false);
     }, 500);
   };
@@ -163,15 +177,15 @@ export default function Swipe() {
         {hasMoreUniversities ? (
           <div 
             {...swipeHandlers}
-            className="card relative"
-            style={getCardStyle()}
+            className={`card relative transition-transform duration-500 ${
+              swipeAnimation === 'left' ? 'translate-x-[-150%] rotate-[-30deg] opacity-0' : 
+              swipeAnimation === 'right' ? 'translate-x-[150%] rotate-[30deg] opacity-0' : ''
+            }`}
           >
             <div 
-              className="card h-full w-full flex flex-col justify-end overflow-hidden"
+              className="card h-full w-full flex flex-col justify-end overflow-hidden bg-cover bg-center"
               style={{
-                background: `linear-gradient(to bottom, rgba(0,0,0,0) 60%, rgba(0,0,0,0.9) 100%), url(${currentUni.image_url || `/placeholder-uni-${currentIndex % 3 + 1}.jpg`})`,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
+                backgroundImage: `linear-gradient(to bottom, rgba(0,0,0,0) 60%, rgba(0,0,0,0.9) 100%), url(${currentUni.image_url || `/placeholder-uni-${currentIndex % 3 + 1}.jpg`})`,
               }}
             >
               {/* Info Button */}
@@ -280,13 +294,13 @@ export default function Swipe() {
             </div>
             
             {/* Swipe-Richtungsanzeigen */}
-            {swipeDirection === 'left' && (
+            {swipeAnimation === 'left' && (
               <div className="absolute top-10 left-10 transform -rotate-45 bg-red-500/90 text-white px-4 py-2 rounded-lg">
                 Nope
               </div>
             )}
             
-            {swipeDirection === 'right' && (
+            {swipeAnimation === 'right' && (
               <div className="absolute top-10 right-10 transform rotate-45 bg-accent/90 text-white px-4 py-2 rounded-lg">
                 Like!
               </div>
