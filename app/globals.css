@@ -4,11 +4,11 @@
 
 @layer components {
   .button {
-    @apply p-3 bg-accent text-white font-semibold rounded-xl shadow-md hover:bg-accent/90 transition-all;
+    @apply py-3 px-4 bg-accent text-white font-semibold rounded-xl shadow-md hover:bg-accent/90 transition-all;
   }
   
   .input {
-    @apply w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-accent;
+    @apply w-full py-2 px-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-accent;
   }
   
   .card {
