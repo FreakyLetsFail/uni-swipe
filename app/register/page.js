@@ -4,12 +4,14 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
+import { FaArrowLeft, FaCheck, FaUser, FaEnvelope, FaLock, FaSchool, FaEye, FaEyeSlash } from 'react-icons/fa';
+import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { FaArrowLeft, FaCheck, FaUniversity, FaUser, FaEnvelope, FaLock, FaBook, FaSchool, FaEye, FaEyeSlash } from 'react-icons/fa';
-import Image from 'next/image';
 
 export default function Register() {
   const router = useRouter();
+  const { signUp, isAuthenticated, loading: authLoading } = useAuth();
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [subjects, setSubjects] = useState([]);
@@ -24,9 +26,9 @@ export default function Register() {
     register, 
     handleSubmit, 
     watch, 
-    formState: { errors, isValid }, 
-    getValues,
-    trigger
+    formState: { errors }, 
+    trigger,
+    getValues
   } = useForm({
     mode: 'onChange',
     defaultValues: {
@@ -40,6 +42,13 @@ export default function Register() {
   });
   
   const password = watch('password');
+
+  // Weiterleitung, wenn der Benutzer bereits angemeldet ist
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push('/swipe');
+    }
+  }, [isAuthenticated, router]);
   
   // Beispiel-Studienfächer für den Fall, dass keine Daten von Supabase geladen werden können
   const fallbackSubjects = [
@@ -124,76 +133,67 @@ export default function Register() {
       setLoading(true);
       setError(null);
 
-      // 1. Registriere den Benutzer bei Supabase
-      const { data: authData, error: signUpError } = await supabase.auth.signUp({
-        email: data.email,
-        password: data.password,
-        options: {
-          data: {
-            full_name: data.fullName,
-          }
+      // 1. Registriere den Benutzer bei Supabase mit Metadaten
+      const { success, data: authData, error: signUpError } = await signUp(
+        data.email, 
+        data.password,
+        {
+          full_name: data.fullName,
+          university: data.university,
+          bio: data.bio
         }
-      });
+      );
 
-      if (signUpError) throw signUpError;
-      
-      if (authData?.user) {
-        // 2. Warte einen Moment, bis der trigger das Profil erstellt hat
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        // 3. Aktualisiere das Profil mit zusätzlichen Informationen
-        const { error: updateError } = await supabase
-          .from('profiles')
-          .update({
-            full_name: data.fullName,
-            university: data.university,
-            bio: data.bio,
-          })
-          .eq('id', authData.user.id);
-
-        if (updateError) throw updateError;
-        
-        // 4. Authentifizierung manuell durchführen, um sicherzustellen, dass der Benutzer angemeldet ist
-        // und die RLS-Policies funktionieren
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-          email: data.email,
-          password: data.password
-        });
-        
-        if (signInError) throw signInError;
-        
-        // 5. Füge die Lieblingsfächer hinzu
-        if (selectedSubjects.length > 0) {
-          // Einzeln einfügen, um mehr Kontrolle zu haben
-          for (const subjectId of selectedSubjects) {
-            const { error: favoriteError } = await supabase
-              .from('user_favorite_subjects')
-              .insert({
-                user_id: authData.user.id,
-                subject_id: subjectId
-              });
-              
-            if (favoriteError) {
-              console.error(`Fehler beim Hinzufügen des Fachs ${subjectId}:`, favoriteError);
-              // Weiter mit dem nächsten Fach, anstatt den gesamten Vorgang abzubrechen
-            }
-          }
-        }
-        
-        setRegistrationSuccess(true);
-        
-        // Kurz warten und dann zum Swipe-Bildschirm navigieren
-        setTimeout(() => {
-          router.push('/swipe');
-        }, 2000);
+      if (!success) {
+        throw signUpError;
       }
+      
+      if (!authData?.user) {
+        throw new Error('Keine Benutzerdaten nach der Registrierung');
+      }
+      
+      const userId = authData.user.id;
+
+      // 2. Füge die Lieblingsfächer hinzu, wenn der Benutzer bereits authentifiziert ist
+      if (authData.session) {
+        for (const subjectId of selectedSubjects) {
+          const { error: favoriteError } = await supabase
+            .from('user_favorite_subjects')
+            .insert({
+              user_id: userId,
+              subject_id: subjectId
+            });
+            
+          if (favoriteError) {
+            console.error(`Fehler beim Hinzufügen des Fachs ${subjectId}:`, favoriteError);
+          }
+        }
+      }
+      
+      // E-Mail-Bestätigung erforderlich, zeige den Erfolgsbildschirm
+      setRegistrationSuccess(true);
+        
     } catch (error) {
       console.error('Registration error:', error);
-      setError(error.message || 'Bei der Registrierung ist ein Fehler aufgetreten.');
+      
+      if (error.message.includes('already registered')) {
+        setError('Diese E-Mail-Adresse ist bereits registriert. Bitte melde dich an oder nutze die Passwort-Vergessen-Funktion.');
+      } else {
+        setError(error.message || 'Bei der Registrierung ist ein Fehler aufgetreten.');
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  // Zeige Ladeanzeige, wenn Auth-Provider noch lädt
+  if (authLoading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
+      </div>
+    );
+  }
 
   // Erfolgsseite nach der Registrierung
   if (registrationSuccess) {

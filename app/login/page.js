@@ -1,77 +1,75 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
 import { FaArrowLeft, FaEnvelope, FaLock, FaEye, FaEyeSlash } from 'react-icons/fa';
+import { useAuth } from '@/context/AuthContext';
 
 export default function Login() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get('redirectTo') || '/swipe';
+  
+  const { signIn, loading: authLoading, isAuthenticated } = useAuth();
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [showPassword, setShowPassword] = useState(false);
-  const { register, handleSubmit, formState: { errors } } = useForm();
+  
+  const { 
+    register, 
+    handleSubmit, 
+    formState: { errors }
+  } = useForm();
 
-  // Simplified authentication function focused on essential operations
+  // Weiterleitung, wenn der Benutzer bereits angemeldet ist
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push(redirectTo);
+    }
+  }, [isAuthenticated, router, redirectTo]);
+
   const onSubmit = async (data) => {
     try {
       setLoading(true);
       setError(null);
-      console.log("Login attempt started for:", data.email);
-
-      // 1. Clear any existing sessions
-      await supabase.auth.signOut();
       
-      // 2. Attempt login with explicit storage setting
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: data.email,
-        password: data.password,
-        options: {
-          persistSession: true
-        }
-      });
-
-      if (authError) {
-        console.error("Authentication error:", authError);
-        
-        if (authError.message.includes('Email not confirmed')) {
+      const { success, error, data: authData } = await signIn(data.email, data.password);
+      
+      if (!success) {
+        // Fehlerbehandlung
+        if (error.message.includes('Email not confirmed')) {
           setError('Deine E-Mail-Adresse wurde noch nicht bestätigt. Bitte überprüfe deinen Posteingang.');
-        } else if (authError.message.includes('Invalid login credentials')) {
+        } else if (error.message.includes('Invalid login credentials')) {
           setError('Ungültige Anmeldedaten. Bitte überprüfe deine E-Mail-Adresse und dein Passwort.');
         } else {
-          setError(`Anmeldung fehlgeschlagen: ${authError.message}`);
+          setError(`Anmeldung fehlgeschlagen: ${error.message}`);
         }
         return;
       }
-
-      if (!authData.session) {
-        console.error("No session returned from authentication");
-        setError('Keine Sitzung erstellt. Bitte versuche es erneut.');
-        return;
-      }
-
-      console.log("Authentication successful, session created");
       
-      // 3. Force session to be saved by explicitly setting it
-      await supabase.auth.setSession({
-        access_token: authData.session.access_token,
-        refresh_token: authData.session.refresh_token
-      });
-
-      console.log("Session explicitly set, redirecting...");
+      // Bei Erfolg zur Swipe-Seite oder zur Umleitungsseite navigieren
+      // Verwende window.location für eine vollständige Seitenaktualisierung
+      console.log('Login erfolgreich, leite weiter zu:', redirectTo);
+      window.location.href = redirectTo;
       
-      // 4. Redirect to the swipe page with hard navigation
-      window.location.href = '/swipe';
-      
-    } catch (error) {
-      console.error('Unexpected login error:', error);
+    } catch (err) {
+      console.error('Unerwarteter Login-Fehler:', err);
       setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
     } finally {
       setLoading(false);
     }
   };
+
+  // Zeige Ladeanzeige, wenn Auth-Provider noch lädt
+  if (authLoading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-md mx-auto py-8 px-4">
@@ -154,9 +152,9 @@ export default function Login() {
         <button
           type="submit"
           className="button w-full mt-2"
-          disabled={loading}
+          disabled={loading || authLoading}
         >
-          {loading ? (
+          {loading || authLoading ? (
             <div className="flex items-center justify-center">
               <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
               Anmeldung...
