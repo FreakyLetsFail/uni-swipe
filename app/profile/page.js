@@ -16,6 +16,7 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [savingSubjects, setSavingSubjects] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [error, setError] = useState(null);
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
 
   useEffect(() => {
@@ -81,34 +82,58 @@ export default function Profile() {
     }
   };
 
+  // Verbesserte toggleFavoriteSubject Funktion
   const toggleFavoriteSubject = async (subjectId) => {
     try {
       setSavingSubjects(true);
+      setError(null);
       
+      // Überprüfe den aktuellen Authentifizierungsstatus
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.error('Benutzer ist nicht authentifiziert');
+        setError('Du musst angemeldet sein, um Lieblingsfächer zu verwalten');
+        return;
+      }
+      
+      const userId = session.user.id;
       const isFavorite = favoriteSubjects.includes(subjectId);
       
       if (isFavorite) {
         // Favorit entfernen
-        await supabase
+        const { error } = await supabase
           .from('user_favorite_subjects')
           .delete()
-          .eq('user_id', user.id)
+          .eq('user_id', userId)
           .eq('subject_id', subjectId);
           
+        if (error) {
+          console.error('Fehler beim Entfernen des Favoriten:', error);
+          setError('Fehler beim Entfernen des Fachs: ' + error.message);
+          return;
+        }
+        
         setFavoriteSubjects(prev => prev.filter(id => id !== subjectId));
       } else {
         // Favorit hinzufügen
-        await supabase
+        const { error } = await supabase
           .from('user_favorite_subjects')
           .insert({
-            user_id: user.id,
+            user_id: userId,
             subject_id: subjectId
           });
+          
+        if (error) {
+          console.error('Fehler beim Hinzufügen des Favoriten:', error);
+          setError('Fehler beim Hinzufügen des Fachs: ' + error.message);
+          return;
+        }
           
         setFavoriteSubjects(prev => [...prev, subjectId]);
       }
     } catch (error) {
       console.error('Fehler beim Aktualisieren der Favoriten:', error);
+      setError('Ein unerwarteter Fehler ist aufgetreten: ' + error.message);
     } finally {
       setSavingSubjects(false);
     }
@@ -133,14 +158,20 @@ export default function Profile() {
       setEditing(false);
     } catch (error) {
       console.error('Fehler beim Aktualisieren des Profils:', error);
+      setError('Fehler beim Aktualisieren des Profils: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    router.push('/');
+    try {
+      await supabase.auth.signOut();
+      router.push('/');
+    } catch (error) {
+      console.error('Fehler beim Abmelden:', error);
+      setError('Fehler beim Abmelden: ' + error.message);
+    }
   };
 
   if (loading && !profile) {
@@ -167,6 +198,12 @@ export default function Profile() {
           <FaSignOutAlt className="text-gray-600" />
         </button>
       </header>
+
+      {error && (
+        <div id="error-container" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {error}
+        </div>
+      )}
 
       {editing ? (
         <form onSubmit={handleSubmit(updateProfile)} className="space-y-4">

@@ -113,8 +113,8 @@ export default function Register() {
     setCurrentStep(prev => prev - 1);
   };
 
-//  onSubmit-Funktion für die Registrierung
-    const onSubmit = async (data) => {
+  // Verbesserte onSubmit-Funktion für die Registrierung
+  const onSubmit = async (data) => {
     if (selectedSubjects.length === 0) {
       setError('Bitte wähle mindestens ein Studienfach aus.');
       return;
@@ -123,7 +123,7 @@ export default function Register() {
     try {
       setLoading(true);
       setError(null);
-  
+
       // 1. Registriere den Benutzer bei Supabase
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: data.email,
@@ -134,12 +134,12 @@ export default function Register() {
           }
         }
       });
-  
+
       if (signUpError) throw signUpError;
       
       if (authData?.user) {
         // 2. Warte einen Moment, bis der trigger das Profil erstellt hat
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 1500));
         
         // 3. Aktualisiere das Profil mit zusätzlichen Informationen
         const { error: updateError } = await supabase
@@ -150,21 +150,34 @@ export default function Register() {
             bio: data.bio,
           })
           .eq('id', authData.user.id);
-  
+
         if (updateError) throw updateError;
         
-        // 4. Füge die Lieblingsfächer hinzu
+        // 4. Authentifizierung manuell durchführen, um sicherzustellen, dass der Benutzer angemeldet ist
+        // und die RLS-Policies funktionieren
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: data.email,
+          password: data.password
+        });
+        
+        if (signInError) throw signInError;
+        
+        // 5. Füge die Lieblingsfächer hinzu
         if (selectedSubjects.length > 0) {
-          const favoriteSubjectsData = selectedSubjects.map(subjectId => ({
-            user_id: authData.user.id,
-            subject_id: subjectId
-          }));
-          
-          const { error: favoritesError } = await supabase
-            .from('user_favorite_subjects')
-            .insert(favoriteSubjectsData);
-            
-          if (favoritesError) throw favoritesError;
+          // Einzeln einfügen, um mehr Kontrolle zu haben
+          for (const subjectId of selectedSubjects) {
+            const { error: favoriteError } = await supabase
+              .from('user_favorite_subjects')
+              .insert({
+                user_id: authData.user.id,
+                subject_id: subjectId
+              });
+              
+            if (favoriteError) {
+              console.error(`Fehler beim Hinzufügen des Fachs ${subjectId}:`, favoriteError);
+              // Weiter mit dem nächsten Fach, anstatt den gesamten Vorgang abzubrechen
+            }
+          }
         }
         
         setRegistrationSuccess(true);
