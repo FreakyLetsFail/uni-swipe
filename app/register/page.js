@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import { FaArrowLeft, FaCheck, FaUniversity, FaUser, FaEnvelope, FaLock, FaBook, FaSchool } from 'react-icons/fa';
+import { FaArrowLeft, FaCheck, FaUniversity, FaUser, FaEnvelope, FaLock, FaBook, FaSchool, FaEye, FaEyeSlash } from 'react-icons/fa';
 import Image from 'next/image';
 
 export default function Register() {
@@ -13,9 +13,12 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [subjects, setSubjects] = useState([]);
+  const [loadingSubjects, setLoadingSubjects] = useState(true);
   const [selectedSubjects, setSelectedSubjects] = useState([]);
   const [currentStep, setCurrentStep] = useState(1);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   const { 
     register, 
@@ -38,19 +41,45 @@ export default function Register() {
   
   const password = watch('password');
   
+  // Beispiel-Studienfächer für den Fall, dass keine Daten von Supabase geladen werden können
+  const fallbackSubjects = [
+    { id: 1, name: "Informatik", degree_type: "Bachelor", duration: 6 },
+    { id: 2, name: "Maschinenbau", degree_type: "Bachelor", duration: 6 },
+    { id: 3, name: "Elektrotechnik", degree_type: "Bachelor", duration: 6 },
+    { id: 4, name: "Medizin", degree_type: "Staatsexamen", duration: 12 },
+    { id: 5, name: "Psychologie", degree_type: "Bachelor", duration: 6 },
+    { id: 6, name: "Rechtswissenschaften", degree_type: "Staatsexamen", duration: 9 },
+    { id: 7, name: "Physik", degree_type: "Bachelor", duration: 6 },
+    { id: 8, name: "Biologie", degree_type: "Bachelor", duration: 6 },
+    { id: 9, name: "Wirtschaftswissenschaften", degree_type: "Bachelor", duration: 6 },
+    { id: 10, name: "Mathematik", degree_type: "Bachelor", duration: 6 },
+  ];
+
   // Lade verfügbare Studienfächer
   useEffect(() => {
     const loadSubjects = async () => {
       try {
+        setLoadingSubjects(true);
         const { data, error } = await supabase
           .from('subjects')
           .select('*')
           .order('name');
           
         if (error) throw error;
-        setSubjects(data || []);
+        
+        // Verwende die geladenen Daten, wenn verfügbar, sonst Fallback-Daten
+        if (data && data.length > 0) {
+          setSubjects(data);
+          console.log("Subjects loaded from Supabase:", data.length);
+        } else {
+          console.log("No subjects found in database, using fallback data");
+          setSubjects(fallbackSubjects);
+        }
       } catch (error) {
         console.error('Fehler beim Laden der Fächer:', error);
+        setSubjects(fallbackSubjects);
+      } finally {
+        setLoadingSubjects(false);
       }
     };
     
@@ -68,7 +97,12 @@ export default function Register() {
 
   // Zum nächsten Registrierungsschritt gehen
   const nextStep = async () => {
-    const isStepValid = await trigger();
+    const fieldsToValidate = currentStep === 1 
+      ? ['email', 'password', 'confirmPassword'] 
+      : ['fullName'];
+      
+    const isStepValid = await trigger(fieldsToValidate);
+    
     if (isStepValid) {
       setCurrentStep(prev => prev + 1);
     }
@@ -79,8 +113,8 @@ export default function Register() {
     setCurrentStep(prev => prev - 1);
   };
 
-  // Registrierung abschließen
-  const onSubmit = async (data) => {
+//  onSubmit-Funktion für die Registrierung
+    const onSubmit = async (data) => {
     if (selectedSubjects.length === 0) {
       setError('Bitte wähle mindestens ein Studienfach aus.');
       return;
@@ -89,17 +123,25 @@ export default function Register() {
     try {
       setLoading(true);
       setError(null);
-
-      // Registriere den Benutzer bei Supabase
+  
+      // 1. Registriere den Benutzer bei Supabase
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
+        options: {
+          data: {
+            full_name: data.fullName,
+          }
+        }
       });
-
+  
       if (signUpError) throw signUpError;
       
       if (authData?.user) {
-        // Aktualisiere das Profil mit zusätzlichen Informationen
+        // 2. Warte einen Moment, bis der trigger das Profil erstellt hat
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // 3. Aktualisiere das Profil mit zusätzlichen Informationen
         const { error: updateError } = await supabase
           .from('profiles')
           .update({
@@ -108,10 +150,10 @@ export default function Register() {
             bio: data.bio,
           })
           .eq('id', authData.user.id);
-
+  
         if (updateError) throw updateError;
         
-        // Füge die Lieblingsfächer hinzu
+        // 4. Füge die Lieblingsfächer hinzu
         if (selectedSubjects.length > 0) {
           const favoriteSubjectsData = selectedSubjects.map(subjectId => ({
             user_id: authData.user.id,
@@ -133,6 +175,7 @@ export default function Register() {
         }, 2000);
       }
     } catch (error) {
+      console.error('Registration error:', error);
       setError(error.message || 'Bei der Registrierung ist ein Fehler aufgetreten.');
     } finally {
       setLoading(false);
@@ -150,13 +193,16 @@ export default function Register() {
         </div>
         <h1 className="text-3xl font-bold text-center mb-2">Registrierung erfolgreich!</h1>
         <p className="text-gray-600 text-center mb-6">
-          Dein Konto wurde erstellt. Du wirst in Kürze weitergeleitet...
+          Bitte bestätige deine E-Mail-Adresse. Wir haben dir einen Bestätigungslink gesendet.
+        </p>
+        <p className="text-gray-600 text-center mb-6">
+          Nach der Bestätigung kannst du dich anmelden und UniSwipe nutzen.
         </p>
         <button
-          onClick={() => router.push('/swipe')}
+          onClick={() => router.push('/login')}
           className="button"
         >
-          Jetzt Unis entdecken
+          Zum Login
         </button>
       </div>
     );
@@ -209,7 +255,7 @@ export default function Register() {
       </div>
       
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+        <div id="error-container" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
           {error}
         </div>
       )}
@@ -256,14 +302,21 @@ export default function Register() {
                 </div>
                 <input
                   id="password"
-                  type="password"
-                  className="input pl-10"
+                  type={showPassword ? "text" : "password"}
+                  className="input pl-10 pr-10"
                   placeholder="Mindestens 6 Zeichen"
                   {...register('password', { 
                     required: 'Passwort ist erforderlich',
                     minLength: { value: 6, message: 'Passwort muss mindestens 6 Zeichen lang sein' }
                   })}
                 />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? <FaEyeSlash className="text-gray-400" /> : <FaEye className="text-gray-400" />}
+                </button>
               </div>
               {errors.password && (
                 <p className="text-red-500 text-sm mt-1">{errors.password.message}</p>
@@ -280,14 +333,21 @@ export default function Register() {
                 </div>
                 <input
                   id="confirmPassword"
-                  type="password"
-                  className="input pl-10"
+                  type={showConfirmPassword ? "text" : "password"}
+                  className="input pl-10 pr-10"
                   placeholder="Passwort wiederholen"
                   {...register('confirmPassword', { 
                     required: 'Bitte bestätige dein Passwort',
                     validate: value => value === password || 'Die Passwörter stimmen nicht überein'
                   })}
                 />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                >
+                  {showConfirmPassword ? <FaEyeSlash className="text-gray-400" /> : <FaEye className="text-gray-400" />}
+                </button>
               </div>
               {errors.confirmPassword && (
                 <p className="text-red-500 text-sm mt-1">{errors.confirmPassword.message}</p>
@@ -361,10 +421,20 @@ export default function Register() {
             </p>
             
             <div className="bg-white rounded-xl shadow p-4 max-h-[400px] overflow-y-auto">
-              {subjects.length === 0 ? (
-                <div className="text-center py-4">
+              {loadingSubjects ? (
+                <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-accent mx-auto mb-2"></div>
                   <p>Fächer werden geladen...</p>
+                </div>
+              ) : subjects.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">Keine Fächer gefunden.</p>
+                  <button 
+                    onClick={() => setSubjects(fallbackSubjects)}
+                    className="mt-4 text-accent underline"
+                  >
+                    Standard-Fächer laden
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -432,7 +502,14 @@ export default function Register() {
               className="button flex-1"
               disabled={loading}
             >
-              {loading ? 'Registrierung...' : 'Registrieren'}
+              {loading ? (
+                <div className="flex items-center justify-center">
+                  <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                  Registrierung...
+                </div>
+              ) : (
+                'Registrieren'
+              )}
             </button>
           )}
         </div>

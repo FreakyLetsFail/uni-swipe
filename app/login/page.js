@@ -25,7 +25,46 @@ export default function Login() {
         password: data.password,
       });
 
-      if (error) throw error;
+      if (error) {
+        if (error.message.includes('Email not confirmed')) {
+          setError('Deine E-Mail-Adresse wurde noch nicht bestätigt. Bitte überprüfe deinen Posteingang und klicke auf den Bestätigungslink.');
+          
+          // Element für "Neue Bestätigungsmail senden" Button erstellen
+          setTimeout(() => {
+            const errorContainer = document.getElementById('error-container');
+            if (errorContainer && !document.getElementById('resend-button')) {
+              const resendButton = document.createElement('button');
+              resendButton.id = 'resend-button';
+              resendButton.innerText = 'Neue Bestätigungsmail senden';
+              resendButton.className = 'mt-2 text-accent underline';
+              resendButton.onclick = async () => {
+                try {
+                  const { error: resendError } = await supabase.auth.resend({
+                    type: 'signup',
+                    email: data.email,
+                  });
+                  
+                  if (resendError) {
+                    setError('Es gab ein Problem beim Senden der Bestätigungsmail. Bitte versuche es später erneut.');
+                  } else {
+                    setError('Eine neue Bestätigungsmail wurde gesendet. Bitte überprüfe deinen Posteingang.');
+                  }
+                } catch (e) {
+                  console.error('Fehler beim Senden der Bestätigungsmail:', e);
+                  setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
+                }
+              };
+              
+              errorContainer.appendChild(resendButton);
+            }
+          }, 100);
+        } else if (error.message.includes('Invalid login credentials')) {
+          setError('Ungültige Anmeldedaten. Bitte überprüfe deine E-Mail-Adresse und dein Passwort.');
+        } else {
+          setError('Anmeldung fehlgeschlagen: ' + error.message);
+        }
+        return;
+      }
 
       router.push('/swipe');
     } catch (error) {
@@ -79,9 +118,11 @@ export default function Login() {
       </div>
       
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 flex items-center">
-          <span className="mr-2">⚠️</span>
-          <span>{error}</span>
+        <div id="error-container" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 flex flex-col">
+          <span className="flex items-center">
+            <span className="mr-2">⚠️</span>
+            <span>{error}</span>
+          </span>
         </div>
       )}
       

@@ -1,34 +1,32 @@
+// app/matches/page.js
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { FaArrowLeft, FaExternalLinkAlt, FaTrash } from 'react-icons/fa';
+import { FaExternalLinkAlt, FaTrash } from 'react-icons/fa';
 import Link from 'next/link';
-import Image from 'next/image';
+import { useAuth } from '@/context/AuthContext';
+import Header from '@/components/Header';
+import { removeUniversityMatch } from '@/lib/recommendation';
 
 export default function Matches() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+    if (authLoading) return;
+    
+    if (!user) {
+      router.push('/login');
+      return;
+    }
 
-      if (!session) {
-        router.push('/login');
-        return;
-      }
-
-      setUser(session.user);
-      await loadMatches(session.user.id);
-    };
-
-    checkUser();
-  }, [router]);
+    loadMatches(user.id);
+  }, [user, authLoading, router]);
 
   const loadMatches = async (userId) => {
     try {
@@ -82,13 +80,7 @@ export default function Matches() {
     try {
       setDeleting(true);
       
-      const { error } = await supabase
-        .from('matches')
-        .delete()
-        .eq('id', matchId);
-
-      if (error) throw error;
-
+      await removeUniversityMatch(matchId);
       setMatches(prev => prev.filter(match => match.id !== matchId));
     } catch (error) {
       console.error('Fehler beim Entfernen des Matches:', error);
@@ -97,7 +89,7 @@ export default function Matches() {
     }
   };
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
@@ -107,14 +99,9 @@ export default function Matches() {
 
   return (
     <div className="max-w-xl mx-auto py-6 px-4">
-      <header className="flex items-center mb-6">
-        <Link href="/swipe">
-          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mr-4">
-            <FaArrowLeft className="text-gray-600" />
-          </div>
-        </Link>
-        <h1 className="text-2xl font-bold">Meine gemerkten Unis</h1>
-      </header>
+      <Header activeTab="matches" />
+      
+      <h1 className="text-2xl font-bold my-6">Meine gemerkten Unis</h1>
 
       {matches.length === 0 ? (
         <div className="bg-white rounded-xl shadow-lg p-6 text-center">
@@ -140,7 +127,7 @@ export default function Matches() {
                 <div 
                   className="absolute inset-0"
                   style={{
-                    background: `linear-gradient(to bottom, rgba(0,0,0,0) 40%, rgba(0,0,0,0.8) 100%), url(/placeholder-uni-${match.university.id % 3 + 1}.jpg)`,
+                    background: `linear-gradient(to bottom, rgba(0,0,0,0) 40%, rgba(0,0,0,0.8) 100%), url(${match.university.image_url || `/placeholder-uni-${match.university.id % 3 + 1}.jpg`})`,
                     backgroundSize: 'cover',
                     backgroundPosition: 'center',
                   }}
