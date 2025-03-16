@@ -2,43 +2,63 @@ import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
 import { NextResponse } from 'next/server';
 
 export async function middleware(req) {
+  // Create a response object
   const res = NextResponse.next();
+  
+  // Create a Supabase client specifically for this middleware
   const supabase = createMiddlewareClient({ req, res });
   
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  try {
+    // Get the session with explicit logging
+    const { data, error } = await supabase.auth.getSession();
+    
+    if (error) {
+      console.error("Session retrieval error in middleware:", error);
+    }
+    
+    const session = data?.session;
+    
+    // Log session details for debugging (omit sensitive data in production)
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`Middleware session check for ${req.nextUrl.pathname}:`, {
+        hasSession: !!session,
+        userId: session?.user?.id,
+        expiresAt: session?.expires_at
+      });
+    }
 
-  // Geschützte Routen, die einen Login erfordern
-  const protectedRoutes = ['/swipe', '/profile', '/matches'];
-  const isProtectedRoute = protectedRoutes.some(route => 
-    req.nextUrl.pathname === route || req.nextUrl.pathname.startsWith(`${route}/`)
-  );
+    // Define protected and auth routes
+    const protectedRoutes = ['/swipe', '/profile', '/matches'];
+    const isProtectedRoute = protectedRoutes.some(route => 
+      req.nextUrl.pathname === route || req.nextUrl.pathname.startsWith(`${route}/`)
+    );
 
-  // Authentifizierungsrouten
-  const authRoutes = ['/login', '/register'];
-  const isAuthRoute = authRoutes.some(route => 
-    req.nextUrl.pathname === route || req.nextUrl.pathname.startsWith(`${route}/`)
-  );
+    const authRoutes = ['/login', '/register'];
+    const isAuthRoute = authRoutes.some(route => 
+      req.nextUrl.pathname === route || req.nextUrl.pathname.startsWith(`${route}/`)
+    );
 
-  // Prüfen, ob der Benutzer nicht angemeldet ist und auf eine geschützte Route zugreifen möchte
-  if (!session && isProtectedRoute) {
-    const redirectUrl = req.nextUrl.clone();
-    redirectUrl.pathname = '/login';
-    return NextResponse.redirect(redirectUrl);
+    // Redirect unauthenticated users from protected routes
+    if (!session && isProtectedRoute) {
+      console.log(`Redirecting from ${req.nextUrl.pathname} to /login (no session)`);
+      const redirectUrl = new URL('/login', req.url);
+      return NextResponse.redirect(redirectUrl);
+    }
+    
+    // Redirect authenticated users from auth routes
+    if (session && isAuthRoute) {
+      console.log(`Redirecting from ${req.nextUrl.pathname} to /swipe (has session)`);
+      const redirectUrl = new URL('/swipe', req.url);
+      return NextResponse.redirect(redirectUrl);
+    }
+  } catch (error) {
+    console.error('Middleware error:', error);
   }
   
-  // Wenn der Benutzer bereits angemeldet ist und auf die Login-Seite zugreifen möchte
-  if (session && isAuthRoute) {
-    const redirectUrl = req.nextUrl.clone();
-    redirectUrl.pathname = '/swipe';
-    return NextResponse.redirect(redirectUrl);
-  }
-  
+  // Return the response with the updated headers for session management
   return res;
 }
 
-// Konfiguriere die Middleware, um auf bestimmten Routen zu laufen
 export const config = {
   matcher: [
     '/swipe/:path*',

@@ -1,12 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { FaArrowLeft, FaEnvelope, FaLock, FaEye, FaEyeSlash } from 'react-icons/fa';
-import Image from 'next/image';
 
 export default function Login() {
   const router = useRouter();
@@ -15,68 +14,63 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const { register, handleSubmit, formState: { errors } } = useForm();
 
+  // Simplified authentication function focused on essential operations
   const onSubmit = async (data) => {
     try {
       setLoading(true);
       setError(null);
+      console.log("Login attempt started for:", data.email);
 
-      const { error } = await supabase.auth.signInWithPassword({
+      // 1. Clear any existing sessions
+      await supabase.auth.signOut();
+      
+      // 2. Attempt login with explicit storage setting
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: data.email,
         password: data.password,
+        options: {
+          persistSession: true
+        }
       });
 
-      if (error) {
-        if (error.message.includes('Email not confirmed')) {
-          setError('Deine E-Mail-Adresse wurde noch nicht bestätigt. Bitte überprüfe deinen Posteingang und klicke auf den Bestätigungslink.');
-          
-          // Element für "Neue Bestätigungsmail senden" Button erstellen
-          setTimeout(() => {
-            const errorContainer = document.getElementById('error-container');
-            if (errorContainer && !document.getElementById('resend-button')) {
-              const resendButton = document.createElement('button');
-              resendButton.id = 'resend-button';
-              resendButton.innerText = 'Neue Bestätigungsmail senden';
-              resendButton.className = 'mt-2 text-accent underline';
-              resendButton.onclick = async () => {
-                try {
-                  const { error: resendError } = await supabase.auth.resend({
-                    type: 'signup',
-                    email: data.email,
-                  });
-                  
-                  if (resendError) {
-                    setError('Es gab ein Problem beim Senden der Bestätigungsmail. Bitte versuche es später erneut.');
-                  } else {
-                    setError('Eine neue Bestätigungsmail wurde gesendet. Bitte überprüfe deinen Posteingang.');
-                  }
-                } catch (e) {
-                  console.error('Fehler beim Senden der Bestätigungsmail:', e);
-                  setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
-                }
-              };
-              
-              errorContainer.appendChild(resendButton);
-            }
-          }, 100);
-        } else if (error.message.includes('Invalid login credentials')) {
+      if (authError) {
+        console.error("Authentication error:", authError);
+        
+        if (authError.message.includes('Email not confirmed')) {
+          setError('Deine E-Mail-Adresse wurde noch nicht bestätigt. Bitte überprüfe deinen Posteingang.');
+        } else if (authError.message.includes('Invalid login credentials')) {
           setError('Ungültige Anmeldedaten. Bitte überprüfe deine E-Mail-Adresse und dein Passwort.');
         } else {
-          setError('Anmeldung fehlgeschlagen: ' + error.message);
+          setError(`Anmeldung fehlgeschlagen: ${authError.message}`);
         }
         return;
       }
 
-      router.push('/swipe');
+      if (!authData.session) {
+        console.error("No session returned from authentication");
+        setError('Keine Sitzung erstellt. Bitte versuche es erneut.');
+        return;
+      }
+
+      console.log("Authentication successful, session created");
+      
+      // 3. Force session to be saved by explicitly setting it
+      await supabase.auth.setSession({
+        access_token: authData.session.access_token,
+        refresh_token: authData.session.refresh_token
+      });
+
+      console.log("Session explicitly set, redirecting...");
+      
+      // 4. Redirect to the swipe page with hard navigation
+      window.location.href = '/swipe';
+      
     } catch (error) {
-      console.error('Login error:', error);
-      setError('Anmeldung fehlgeschlagen. Bitte überprüfe deine Anmeldedaten.');
+      console.error('Unexpected login error:', error);
+      setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const togglePasswordVisibility = () => {
-    setShowPassword(!showPassword);
   };
 
   return (
@@ -89,48 +83,25 @@ export default function Login() {
           </div>
         </Link>
         <h1 className="text-2xl font-bold">Login</h1>
-        <div className="w-10 h-10 opacity-0">
-          {/* Platzhalter für gleichmäßiges Layout */}
-        </div>
+        <div className="w-10 h-10 opacity-0"></div>
       </div>
       
-      {/* Logo */}
+      {/* Logo - Simple text version */}
       <div className="flex justify-center mb-8">
         <div className="w-24 h-24 rounded-full bg-accent/10 flex items-center justify-center">
-          <Image 
-            src="/logo.png" 
-            alt="UniSwipe Logo" 
-            width={80} 
-            height={80}
-            onError={(e) => {
-              e.target.onerror = null;
-              e.target.style.display = 'none';
-              const parent = e.target.parentNode;
-              if (parent) {
-                const fallback = document.createElement('div');
-                fallback.className = "text-3xl font-bold text-accent";
-                fallback.textContent = "US";
-                parent.appendChild(fallback);
-              }
-            }}
-          />
+          <div className="text-3xl font-bold text-accent">US</div>
         </div>
       </div>
       
       {error && (
-        <div id="error-container" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 flex flex-col">
-          <span className="flex items-center">
-            <span className="mr-2">⚠️</span>
-            <span>{error}</span>
-          </span>
+        <div id="error-container" className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          <span>{error}</span>
         </div>
       )}
       
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
-          <label htmlFor="email" className="block mb-1 font-medium">
-            E-Mail
-          </label>
+          <label htmlFor="email" className="block mb-1 font-medium">E-Mail</label>
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center">
               <FaEnvelope className="text-gray-400" />
@@ -149,15 +120,11 @@ export default function Login() {
               })}
             />
           </div>
-          {errors.email && (
-            <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>
-          )}
+          {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>}
         </div>
         
         <div>
-          <label htmlFor="password" className="block mb-1 font-medium">
-            Passwort
-          </label>
+          <label htmlFor="password" className="block mb-1 font-medium">Passwort</label>
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center">
               <FaLock className="text-gray-400" />
@@ -172,24 +139,16 @@ export default function Login() {
             <button
               type="button"
               className="absolute inset-y-0 right-0 pr-3 flex items-center"
-              onClick={togglePasswordVisibility}
+              onClick={() => setShowPassword(!showPassword)}
             >
-              {showPassword ? (
-                <FaEyeSlash className="text-gray-400" />
-              ) : (
-                <FaEye className="text-gray-400" />
-              )}
+              {showPassword ? <FaEyeSlash className="text-gray-400" /> : <FaEye className="text-gray-400" />}
             </button>
           </div>
-          {errors.password && (
-            <p className="text-red-500 text-sm mt-1">{errors.password.message}</p>
-          )}
+          {errors.password && <p className="text-red-500 text-sm mt-1">{errors.password.message}</p>}
         </div>
         
         <div className="flex justify-end">
-          <Link href="/reset-password" className="text-sm text-accent">
-            Passwort vergessen?
-          </Link>
+          <Link href="/reset-password" className="text-sm text-accent">Passwort vergessen?</Link>
         </div>
         
         <button
@@ -202,9 +161,7 @@ export default function Login() {
               <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mr-2"></div>
               Anmeldung...
             </div>
-          ) : (
-            'Anmelden'
-          )}
+          ) : 'Anmelden'}
         </button>
       </form>
       
@@ -231,13 +188,9 @@ export default function Login() {
       
       <p className="text-center mt-8 text-sm text-gray-600">
         Indem du fortfährst, akzeptierst du unsere{' '}
-        <Link href="/terms" className="text-accent">
-          Nutzungsbedingungen
-        </Link>{' '}
+        <Link href="/terms" className="text-accent">Nutzungsbedingungen</Link>{' '}
         und{' '}
-        <Link href="/privacy" className="text-accent">
-          Datenschutzrichtlinien
-        </Link>
+        <Link href="/privacy" className="text-accent">Datenschutzrichtlinien</Link>
       </p>
     </div>
   );
