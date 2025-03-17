@@ -334,6 +334,35 @@ export default function Register() {
       if (DEBUG_MODE) console.log('Registrierung erfolgreich, Benutzer-ID:', authData.user.id);
       
       const userId = authData.user.id;
+      
+      // 1.5 Profil in der Profiles-Tabelle erstellen, damit Benutzerdaten verfügbar sind
+      try {
+        if (DEBUG_MODE) console.log('Erstelle Profil in der Profiles-Tabelle...');
+        
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert({
+            id: userId,
+            email: data.email,
+            full_name: data.fullName || '',
+            university: data.university || '',
+            bio: data.bio || '',
+            degree_type: degreeType || '',
+            preferred_location: preferredLocation || '',
+            radius: radius || 50,
+            created_at: new Date().toISOString()
+          });
+          
+        if (profileError) {
+          console.error('Fehler beim Erstellen des Profils:', profileError);
+          // Hier keinen Fehler werfen, damit die Registrierung nicht fehlschlägt
+        } else {
+          if (DEBUG_MODE) console.log('Profil erfolgreich erstellt');
+        }
+      } catch (profileCreateError) {
+        console.error('Unerwarteter Fehler beim Erstellen des Profils:', profileCreateError);
+        // Hier keinen Fehler werfen, damit die Registrierung nicht fehlschlägt
+      }
       // 2. Wenn eine Sitzung vorhanden ist (automatische Anmeldung), fügen wir die Lieblingsfächer hinzu
       if (authData.session) {
         if (DEBUG_MODE) console.log('Sitzung gefunden, füge Lieblingsfächer hinzu:', selectedSubjects);

@@ -20,6 +20,8 @@ export default function Profile() {
   const [degreeType, setDegreeType] = useState('');
   const [preferredLocation, setPreferredLocation] = useState('');
   const [radius, setRadius] = useState(50);
+  const [selectedFavoriteSubjects, setSelectedFavoriteSubjects] = useState([]);
+  const [studyGoals, setStudyGoals] = useState('');
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
   const supabase = createClient();
@@ -45,14 +47,73 @@ export default function Profile() {
         .select('*')
         .eq('id', userId)
         .single();
-      if (error) throw error;
+      
+      if (error) {
+        // Wenn das Profil nicht existiert (spezifischer Fehlercode für "not found")
+        if (error.code === 'PGRST116') {
+          console.log('Profil nicht gefunden. Erstelle ein neues Profil...');
+          
+          // Benutzermetadaten abrufen
+          const { data: userData } = await supabase.auth.getUser();
+          const metadata = userData?.user?.user_metadata || {};
+          
+          // Neues Profil erstellen
+          const { data: newProfile, error: createError } = await supabase
+            .from('profiles')
+            .insert({
+              id: userId,
+              email: userData?.user?.email || '',
+              full_name: metadata.full_name || '',
+              university: metadata.university || '',
+              bio: metadata.bio || '',
+              degree_type: metadata.degree_type || '',
+              preferred_location: metadata.preferred_location || '',
+              radius: metadata.radius || 50,
+              study_goals: metadata.study_goals || '',
+              created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+            
+          if (createError) {
+            console.error('Fehler beim Erstellen des Profils:', createError);
+            setError('Fehler beim Erstellen deines Profils: ' + createError.message);
+            return;
+          }
+          
+          console.log('Neues Profil erstellt:', newProfile);
+          
+          // Das neu erstellte Profil verwenden
+          setProfile(newProfile);
+          setDegreeType(newProfile.degree_type || '');
+          setPreferredLocation(newProfile.preferred_location || '');
+          setRadius(newProfile.radius || 50);
+          setStudyGoals(newProfile.study_goals || '');
+          reset(newProfile);
+          return;
+        } else {
+          console.error('Fehler beim Laden des Profils:', error);
+          setError('Fehler beim Laden des Profils: ' + error.message);
+          return;
+        }
+      }
+      
+      // Erfolgreicher Fall - Profil existiert
       setProfile(data);
       setDegreeType(data.degree_type || '');
       setPreferredLocation(data.preferred_location || '');
       setRadius(data.radius || 50);
+      setStudyGoals(data.study_goals || '');
+      
+      // Ausgewählte Lieblingsfächer aus dem Profil laden, falls vorhanden
+      if (data.favorite_subjects) {
+        setSelectedFavoriteSubjects(data.favorite_subjects);
+      }
+      
       reset(data);
     } catch (error) {
       console.error('Fehler beim Laden des Profils:', error);
+      setError('Ein unerwarteter Fehler ist aufgetreten: ' + error.message);
     }
   };
 
@@ -133,17 +194,37 @@ export default function Profile() {
     try {
       setLoading(true);
       
+      // Lieblingsfächer aus den ausgewählten Fächern erstellen
+      const favoriteSubjectsDetails = subjects
+        .filter(subject => favoriteSubjects.includes(subject.id))
+        .map(subject => ({
+          id: subject.id,
+          name: subject.name,
+          degree_type: subject.degree_type,
+          duration: subject.duration
+        }));
+      
       const { error } = await supabase
         .from('profiles')
         .update({
           ...data,
           degree_type: degreeType,
           preferred_location: preferredLocation,
-          radius: radius
+          radius: radius,
+          study_goals: studyGoals,
+          favorite_subjects: favoriteSubjectsDetails
         })
         .eq('id', user.id);
       if (error) throw error;
-      setProfile(prev => ({...prev, ...data}));
+      setProfile(prev => ({
+        ...prev, 
+        ...data, 
+        degree_type: degreeType,
+        preferred_location: preferredLocation,
+        radius: radius,
+        study_goals: studyGoals,
+        favorite_subjects: favoriteSubjectsDetails
+      }));
       setEditing(false);
     } catch (error) {
       console.error('Fehler beim Aktualisieren des Profils:', error);
@@ -284,8 +365,21 @@ export default function Profile() {
             <textarea
               id="bio"
               className="input h-24"
-              placeholder="Erzähle etwas über dich und deine Studienziele..."
+              placeholder="Erzähle etwas über dich..."
               {...register('bio')}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="studyGoals" className="block mb-1 font-medium">
+              Meine Studienziele
+            </label>
+            <textarea
+              id="studyGoals"
+              className="input h-24"
+              placeholder="Was willst du mit deinem Studium erreichen? Welche Ziele verfolgst du?"
+              value={studyGoals}
+              onChange={(e) => setStudyGoals(e.target.value)}
             />
           </div>
 
@@ -336,6 +430,31 @@ export default function Profile() {
               <div>
                 <p className="font-medium">Über mich:</p>
                 <p className="mt-1">{profile.bio}</p>
+              </div>
+            )}
+            
+            {profile.study_goals && (
+              <div className="mt-3">
+                <p className="font-medium">Meine Studienziele:</p>
+                <p className="mt-1">{profile.study_goals}</p>
+              </div>
+            )}
+            
+            {profile.favorite_subjects && profile.favorite_subjects.length > 0 && (
+              <div className="mt-3">
+                <p className="font-medium">Top Lieblingsfächer:</p>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {profile.favorite_subjects.slice(0, 3).map(subject => (
+                    <span key={subject.id} className="text-sm bg-accent/20 text-accent rounded-full px-3 py-1">
+                      {subject.name}
+                    </span>
+                  ))}
+                  {profile.favorite_subjects.length > 3 && (
+                    <span className="text-sm bg-gray-200 rounded-full px-3 py-1">
+                      +{profile.favorite_subjects.length - 3} weitere
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
