@@ -2,7 +2,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/client';
 import { useRouter } from 'next/navigation';
 
 // Auth Kontext erstellen
@@ -10,10 +10,10 @@ const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const router = useRouter();
+  const supabase = createClient();
 
   // Initialen Auth-Status laden
   useEffect(() => {
@@ -22,13 +22,14 @@ export function AuthProvider({ children }) {
         setLoading(true);
         
         // Session abrufen
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
-        setSession(currentSession);
+        const { data: { session } } = await supabase.auth.getSession();
         
         // Benutzerinformationen setzen, falls eine Sitzung besteht
-        if (currentSession) {
+        if (session) {
           const { data: { user: currentUser } } = await supabase.auth.getUser();
           setUser(currentUser);
+        } else {
+          setUser(null);
         }
       } catch (err) {
         console.error('Auth Initialisierung fehlgeschlagen:', err);
@@ -44,7 +45,6 @@ export function AuthProvider({ children }) {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
         console.log('Auth state changed:', event);
-        setSession(newSession);
         
         if (newSession) {
           // Benutzerdaten aktualisieren, wenn eine neue Session vorhanden ist
@@ -60,7 +60,7 @@ export function AuthProvider({ children }) {
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  }, []);
+  }, [router]);
 
   // Login Funktion
   const signIn = async (email, password) => {
@@ -68,30 +68,12 @@ export function AuthProvider({ children }) {
       setLoading(true);
       setError(null);
       
-      // Vor dem Login bestehende Sessions löschen
-      await supabase.auth.signOut();
-      
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
-        options: {
-          persistSession: true
-        }
       });
       
       if (error) throw error;
-      
-      // Session explizit setzen, um sicherzustellen, dass sie gespeichert wird
-      if (data.session) {
-        await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token
-        });
-        
-        // Session und Benutzer aktualisieren
-        setSession(data.session);
-        setUser(data.user);
-      }
       
       return { success: true, data };
     } catch (err) {
@@ -181,14 +163,13 @@ export function AuthProvider({ children }) {
   // Kontext-Werte
   const value = {
     user,
-    session,
     loading,
     error,
     signIn,
     signUp,
     signOut,
     updateProfile,
-    isAuthenticated: !!session,
+    isAuthenticated: !!user,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

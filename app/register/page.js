@@ -4,14 +4,16 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
-import { FaArrowLeft, FaCheck, FaUser, FaEnvelope, FaLock, FaSchool, FaEye, FaEyeSlash } from 'react-icons/fa';
+import { FaArrowLeft, FaUser, FaEnvelope, FaLock, FaSchool, FaEye, FaEyeSlash, FaCheck, FaExclamationTriangle } from 'react-icons/fa';
 import { useAuth } from '@/context/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/client';
 
 export default function Register() {
   const router = useRouter();
   const { signUp, isAuthenticated, loading: authLoading } = useAuth();
+  const supabase = createClient();
   
+  // State management
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [subjects, setSubjects] = useState([]);
@@ -21,14 +23,15 @@ export default function Register() {
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
   
+  // React Hook Form setup
   const { 
     register, 
     handleSubmit, 
     watch, 
     formState: { errors }, 
-    trigger,
-    getValues
+    trigger
   } = useForm({
     mode: 'onChange',
     defaultValues: {
@@ -49,44 +52,35 @@ export default function Register() {
       router.push('/swipe');
     }
   }, [isAuthenticated, router]);
-  
-  // Beispiel-Studienfächer für den Fall, dass keine Daten von Supabase geladen werden können
-  const fallbackSubjects = [
-    { id: 1, name: "Informatik", degree_type: "Bachelor", duration: 6 },
-    { id: 2, name: "Maschinenbau", degree_type: "Bachelor", duration: 6 },
-    { id: 3, name: "Elektrotechnik", degree_type: "Bachelor", duration: 6 },
-    { id: 4, name: "Medizin", degree_type: "Staatsexamen", duration: 12 },
-    { id: 5, name: "Psychologie", degree_type: "Bachelor", duration: 6 },
-    { id: 6, name: "Rechtswissenschaften", degree_type: "Staatsexamen", duration: 9 },
-    { id: 7, name: "Physik", degree_type: "Bachelor", duration: 6 },
-    { id: 8, name: "Biologie", degree_type: "Bachelor", duration: 6 },
-    { id: 9, name: "Wirtschaftswissenschaften", degree_type: "Bachelor", duration: 6 },
-    { id: 10, name: "Mathematik", degree_type: "Bachelor", duration: 6 },
-  ];
 
   // Lade verfügbare Studienfächer
   useEffect(() => {
     const loadSubjects = async () => {
       try {
         setLoadingSubjects(true);
+        setConnectionError(false);
+        
         const { data, error } = await supabase
           .from('subjects')
           .select('*')
           .order('name');
           
-        if (error) throw error;
-        
-        // Verwende die geladenen Daten, wenn verfügbar, sonst Fallback-Daten
-        if (data && data.length > 0) {
-          setSubjects(data);
-          console.log("Subjects loaded from Supabase:", data.length);
-        } else {
-          console.log("No subjects found in database, using fallback data");
-          setSubjects(fallbackSubjects);
+        if (error) {
+          console.error('Fehler bei der Datenbankverbindung:', error);
+          setConnectionError(true);
+          throw error;
         }
+        
+        if (!data || data.length === 0) {
+          console.error('Keine Fächer in der Datenbank gefunden');
+          setConnectionError(true);
+          throw new Error('Keine Fächer gefunden');
+        }
+        
+        setSubjects(data);
       } catch (error) {
         console.error('Fehler beim Laden der Fächer:', error);
-        setSubjects(fallbackSubjects);
+        setConnectionError(true);
       } finally {
         setLoadingSubjects(false);
       }
@@ -122,8 +116,13 @@ export default function Register() {
     setCurrentStep(prev => prev - 1);
   };
 
-  // Verbesserte onSubmit-Funktion für die Registrierung
+  // Funktion für die Registrierung
   const onSubmit = async (data) => {
+    if (connectionError) {
+      setError('Es besteht keine Verbindung zur Datenbank. Registrierung nicht möglich.');
+      return;
+    }
+    
     if (selectedSubjects.length === 0) {
       setError('Bitte wähle mindestens ein Studienfach aus.');
       return;
@@ -176,7 +175,7 @@ export default function Register() {
     } catch (error) {
       console.error('Registration error:', error);
       
-      if (error.message.includes('already registered')) {
+      if (error.message?.includes('already registered')) {
         setError('Diese E-Mail-Adresse ist bereits registriert. Bitte melde dich an oder nutze die Passwort-Vergessen-Funktion.');
       } else {
         setError(error.message || 'Bei der Registrierung ist ein Fehler aufgetreten.');
@@ -217,6 +216,40 @@ export default function Register() {
         >
           Zum Login
         </button>
+      </div>
+    );
+  }
+
+  // Verbindungsfehler zur Datenbank - Anzeigen eines Fehlerbildschirms
+  if (connectionError) {
+    return (
+      <div className="max-w-md mx-auto py-8 px-4">
+        <div className="flex items-center justify-between mb-6">
+          <Link href="/">
+            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+              <FaArrowLeft className="text-gray-600" />
+            </div>
+          </Link>
+          <h1 className="text-2xl font-bold">Registrierung</h1>
+          <div className="w-10 h-10 opacity-0"></div>
+        </div>
+        
+        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6">
+          <div className="flex items-center">
+            <FaExclamationTriangle className="text-red-500 mr-3" />
+            <p className="font-bold">Datenbankverbindung fehlgeschlagen</p>
+          </div>
+          <p className="mt-2">
+            Es konnte keine Verbindung zur Datenbank hergestellt werden. Die Registrierung ist derzeit nicht möglich.
+          </p>
+          <p className="mt-2">
+            Bitte versuche es später erneut oder kontaktiere den Support.
+          </p>
+        </div>
+        
+        <Link href="/" className="button w-full block text-center">
+          Zurück zur Startseite
+        </Link>
       </div>
     );
   }
@@ -438,16 +471,6 @@ export default function Register() {
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-accent mx-auto mb-2"></div>
                   <p>Fächer werden geladen...</p>
-                </div>
-              ) : subjects.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-gray-500">Keine Fächer gefunden.</p>
-                  <button 
-                    onClick={() => setSubjects(fallbackSubjects)}
-                    className="mt-4 text-accent underline"
-                  >
-                    Standard-Fächer laden
-                  </button>
                 </div>
               ) : (
                 <div className="space-y-2">
