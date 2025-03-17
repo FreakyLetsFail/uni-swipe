@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/client';
 import { FaArrowLeft, FaSignOutAlt, FaEdit, FaCheck, FaTimes } from 'react-icons/fa';
 import Link from 'next/link';
 
@@ -18,6 +18,7 @@ export default function Profile() {
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState(null);
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
+  const supabase = createClient();
 
   useEffect(() => {
     const checkUser = async () => {

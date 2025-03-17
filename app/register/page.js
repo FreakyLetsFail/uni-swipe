@@ -5,14 +5,17 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
-import { FaArrowLeft, FaUser, FaEnvelope, FaLock, FaSchool, FaEye, FaEyeSlash, FaCheck, FaExclamationTriangle } from 'react-icons/fa';
+import { FaArrowLeft, FaUser, FaEnvelope, FaLock, FaSchool, FaEye, FaEyeSlash, FaCheck, FaExclamationTriangle, FaSync } from 'react-icons/fa';
 import { useAuth } from '@/context/AuthContext';
 import { createClient } from '@/utils/supabase/client';
+
+// Debug Flag - auf false setzen für Production
+const DEBUG_MODE = true;
 
 export default function Register() {
   const router = useRouter();
   const { signUp, isAuthenticated, loading: authLoading } = useAuth();
-  const supabase = createClient();
+  const [supabase, setSupabase] = useState(null);
   
   // State management
   const [loading, setLoading] = useState(false);
@@ -25,6 +28,8 @@ export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [connectionError, setConnectionError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [connectionStatus, setConnectionStatus] = useState('initializing');
   
   // React Hook Form setup
   const { 
@@ -47,9 +52,30 @@ export default function Register() {
   
   const password = watch('password');
 
+  // Initialisierung von Supabase
+  useEffect(() => {
+    const initSupabase = async () => {
+      try {
+        setConnectionStatus('connecting');
+        if (DEBUG_MODE) console.log('Initialisiere Supabase Client...');
+        const client = createClient();
+        setSupabase(client);
+        setConnectionStatus('connected');
+        if (DEBUG_MODE) console.log('Supabase Client erfolgreich initialisiert:', !!client);
+      } catch (err) {
+        console.error('Fehler bei der Initialisierung des Supabase Clients:', err);
+        setConnectionStatus('failed');
+        setConnectionError(true);
+      }
+    };
+
+    initSupabase();
+  }, []);
+
   // Weiterleitung, wenn der Benutzer bereits angemeldet ist
   useEffect(() => {
     if (isAuthenticated) {
+      if (DEBUG_MODE) console.log('Benutzer ist bereits angemeldet, leite weiter zu /swipe');
       router.push('/swipe');
     }
   }, [isAuthenticated, router]);
@@ -57,17 +83,27 @@ export default function Register() {
   // Lade verfügbare Studienfächer
   useEffect(() => {
     const loadSubjects = async () => {
+      if (!supabase) {
+        if (DEBUG_MODE) console.log('Supabase Client noch nicht initialisiert, überspringe Laden der Fächer');
+        return;
+      }
+
       try {
         setLoadingSubjects(true);
         setConnectionError(false);
         
-        // Füge ein kurzes Timeout hinzu, um sicherzustellen, dass der Supabase-Client bereit ist
-        await new Promise(resolve => setTimeout(resolve, 100));
+        if (DEBUG_MODE) console.log('Starte Laden der Studienfächer, Versuch #', retryCount + 1);
         
+        // Längerer Timeout für sicheres Laden
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        if (DEBUG_MODE) console.log('Führe Datenbankabfrage aus...');
         const { data, error } = await supabase
           .from('subjects')
           .select('*')
           .order('name');
+          
+        if (DEBUG_MODE) console.log('Datenbankabfrage abgeschlossen', { data: !!data, error });
           
         if (error) {
           console.error('Fehler bei der Datenbankverbindung:', error);
@@ -77,21 +113,39 @@ export default function Register() {
         
         if (!data || data.length === 0) {
           console.error('Keine Fächer in der Datenbank gefunden');
+          if (DEBUG_MODE) console.log('Datenbank-Response:', data);
           setConnectionError(true);
           throw new Error('Keine Fächer gefunden');
         }
         
+        if (DEBUG_MODE) console.log(`${data.length} Fächer erfolgreich geladen`);
         setSubjects(data);
       } catch (error) {
         console.error('Fehler beim Laden der Fächer:', error);
         setConnectionError(true);
+        
+        // Retry-Logik für bessere Resilienz
+        if (retryCount < 3) {
+          if (DEBUG_MODE) console.log(`Lade Fächer erneut in 1 Sekunde (Versuch ${retryCount + 1}/3)`);
+          setTimeout(() => {
+            setRetryCount(prev => prev + 1);
+          }, 1000);
+        } else {
+          if (DEBUG_MODE) console.log('Maximale Anzahl an Versuchen erreicht');
+        }
       } finally {
         setLoadingSubjects(false);
       }
     };
     
     loadSubjects();
-  }, []);
+  }, [supabase, retryCount]);
+
+  // Manuelles Neuladen der Fächer
+  const reloadSubjects = () => {
+    if (DEBUG_MODE) console.log('Manuelles Neuladen der Fächer angefordert');
+    setRetryCount(0); // Dies löst ein erneutes Laden aus
+  };
 
   // Funktion zum Umschalten der Fächerauswahl
   const toggleSubject = (subjectId) => {
@@ -136,11 +190,15 @@ export default function Register() {
       setLoading(true);
       setError(null);
 
+      if (DEBUG_MODE) console.log('Starte Registrierungsprozess');
+
       // Verbesserte Validierung
       if (data.password !== data.confirmPassword) {
         throw new Error('Die Passwörter stimmen nicht überein.');
       }
 
+      if (DEBUG_MODE) console.log('Sende Registrierungsdaten an Supabase Auth...');
+      
       // 1. Registriere den Benutzer bei Supabase mit Metadaten
       const { success, data: authData, error: signUpError } = await signUp(
         data.email, 
@@ -160,28 +218,46 @@ export default function Register() {
         throw new Error('Keine Benutzerdaten nach der Registrierung');
       }
       
+      if (DEBUG_MODE) console.log('Registrierung erfolgreich, Benutzer-ID:', authData.user.id);
+      
       const userId = authData.user.id;
 
       // 2. Wenn eine Sitzung vorhanden ist (automatische Anmeldung), fügen wir die Lieblingsfächer hinzu
       if (authData.session) {
+        if (DEBUG_MODE) console.log('Sitzung gefunden, füge Lieblingsfächer hinzu:', selectedSubjects);
+        
         // Verwenden wir Promise.all, um alle Einfügungen parallel zu machen
         try {
-          const favoritePromises = selectedSubjects.map(subjectId => 
-            supabase
+          const favoritePromises = selectedSubjects.map(subjectId => {
+            if (DEBUG_MODE) console.log(`Füge Fach ${subjectId} zu Favoriten hinzu`);
+            
+            return supabase
               .from('user_favorite_subjects')
               .insert({
                 user_id: userId,
                 subject_id: subjectId
-              })
-          );
+              });
+          });
           
           // Warte auf alle Einfügungen
-          await Promise.all(favoritePromises);
+          const results = await Promise.all(favoritePromises);
+          
+          if (DEBUG_MODE) {
+            console.log('Ergebnisse der Fächer-Einfügungen:', 
+              results.map((r, i) => ({
+                subjectId: selectedSubjects[i],
+                success: !r.error,
+                error: r.error
+              }))
+            );
+          }
         } catch (favoriteError) {
           console.error('Fehler beim Hinzufügen der Lieblingsfächer:', favoriteError);
           // Fehler hier nicht werfen, da die Registrierung bereits erfolgreich ist
         }
       }
+      
+      if (DEBUG_MODE) console.log('Registrierung abgeschlossen, zeige Erfolgsseite');
       
       // E-Mail-Bestätigung erforderlich, zeige den Erfolgsbildschirm
       setRegistrationSuccess(true);
@@ -201,6 +277,26 @@ export default function Register() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Debug-Komponente - zeigt Informationen im Debug-Modus
+  const DebugInfo = () => {
+    if (!DEBUG_MODE) return null;
+    
+    return (
+      <div className="mb-4 p-3 bg-yellow-100 border border-yellow-400 text-sm">
+        <p className="font-bold">Debug-Informationen:</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>Supabase Status: {connectionStatus}</li>
+          <li>Subjects geladen: {subjects.length}</li>
+          <li>Subjects werden geladen: {loadingSubjects ? 'Ja' : 'Nein'}</li>
+          <li>Verbindungsfehler: {connectionError ? 'Ja' : 'Nein'}</li>
+          <li>Authentifizierung lädt: {authLoading ? 'Ja' : 'Nein'}</li>
+          <li>Benutzer angemeldet: {isAuthenticated ? 'Ja' : 'Nein'}</li>
+          <li>Retry-Zähler: {retryCount}/3</li>
+        </ul>
+      </div>
+    );
   };
 
   // Zeige Ladeanzeige, wenn Auth-Provider noch lädt
@@ -252,6 +348,8 @@ export default function Register() {
           <div className="w-10 h-10 opacity-0"></div>
         </div>
         
+        {DEBUG_MODE && <DebugInfo />}
+        
         <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6">
           <div className="flex items-center">
             <FaExclamationTriangle className="text-red-500 mr-3" />
@@ -265,9 +363,18 @@ export default function Register() {
           </p>
         </div>
         
-        <Link href="/" className="button w-full block text-center">
-          Zurück zur Startseite
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/" className="button w-full block text-center">
+            Zurück zur Startseite
+          </Link>
+          
+          <button 
+            onClick={reloadSubjects}
+            className="button bg-secondary flex items-center justify-center"
+          >
+            <FaSync className="mr-2" /> Neu laden
+          </button>
+        </div>
       </div>
     );
   }
@@ -286,6 +393,8 @@ export default function Register() {
           {/* Platzhalter für gleichmäßiges Layout */}
         </div>
       </div>
+      
+      {DEBUG_MODE && <DebugInfo />}
       
       {/* Fortschrittsbalken */}
       <div className="mb-8">
@@ -489,8 +598,11 @@ export default function Register() {
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-accent mx-auto mb-2"></div>
                   <p>Fächer werden geladen...</p>
+                  {retryCount > 0 && (
+                    <p className="text-sm text-gray-500 mt-2">Versuch {retryCount}/3</p>
+                  )}
                 </div>
-              ) : (
+              ) : subjects.length > 0 ? (
                 <div className="space-y-2">
                   {subjects.map((subject) => (
                     <div 
@@ -519,6 +631,21 @@ export default function Register() {
                       </div>
                     </div>
                   ))}
+                </div>
+              ) : (
+                <div className="text-center py-6">
+                  <FaExclamationTriangle className="text-amber-500 text-3xl mx-auto mb-2" />
+                  <p className="font-medium">Keine Fächer verfügbar</p>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Die Fächer konnten nicht geladen werden.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={reloadSubjects}
+                    className="button bg-secondary inline-flex items-center"
+                  >
+                    <FaSync className="mr-2" /> Erneut versuchen
+                  </button>
                 </div>
               )}
             </div>

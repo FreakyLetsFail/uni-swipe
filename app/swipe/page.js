@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/client';
 import { getUniversityRecommendations, saveUniversityMatch } from '@/lib/recommendation';
 import { FaHeart, FaTimes, FaUniversity, FaInfoCircle, FaArrowLeft } from 'react-icons/fa';
 import Link from 'next/link';
@@ -19,6 +19,7 @@ export default function Swipe() {
   const [showDetails, setShowDetails] = useState(false);
   const [swipeAnimation, setSwipeAnimation] = useState(null);
   const [matchFeedback, setMatchFeedback] = useState(false);
+  const supabase = createClient();
   
   useEffect(() => {
     const checkUser = async () => {

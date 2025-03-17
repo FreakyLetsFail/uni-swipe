@@ -3,12 +3,12 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import { FaExternalLinkAlt, FaTrash } from 'react-icons/fa';
+import { createClient } from '@/utils/supabase/client';
+import { removeUniversityMatch } from '@/lib/recommendation';
+import { FaExternalLinkAlt, FaTrash, FaUniversity } from 'react-icons/fa';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import Header from '@/components/Header';
-import { removeUniversityMatch } from '@/lib/recommendation';
 
 export default function Matches() {
   const router = useRouter();
@@ -16,6 +16,7 @@ export default function Matches() {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const supabase = createClient();
 
   useEffect(() => {
     if (authLoading) return;

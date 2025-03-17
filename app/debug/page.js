@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/client';
 import { diagnoseAuthIssues, testRlsPolicies } from '@/lib/auth-debug';
 import Link from 'next/link';
 
@@ -13,6 +13,7 @@ export default function DebugPage() {
   const [user, setUser] = useState(null);
   const [diagnosticResults, setDiagnosticResults] = useState(null);
   const [testingRls, setTestingRls] = useState(false);
+  const supabase = createClient();
 
   useEffect(() => {
     const checkUser = async () => {
