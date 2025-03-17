@@ -2,77 +2,113 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
-// Cache für den Server-Client (getrennt pro Request wegen Next.js Server Components)
-let supabaseServerClient = null
-
+/**
+ * Erstellt einen Supabase-Client für Server-seitigen Gebrauch
+ * Der Client wird für jeden Request neu erstellt (wegen Next.js-Isolierung)
+ */
 export async function createClient() {
-  // Server-seitiger Client muss für jeden Request neu erstellt werden
-  // wegen der Cookies-Isolierung in Next.js
   const cookieStore = cookies()
   
-  // Überprüfung der Umgebungsvariablen
+  // Umgebungsvariablen überprüfen
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   
   if (!supabaseUrl || !supabaseKey) {
     console.error('Fehlende Supabase-Umgebungsvariablen')
-    throw new Error('Fehlende Supabase-Umgebungsvariablen')
+    throw new Error('Supabase Konfiguration fehlt')
   }
   
-  return createServerClient(
-    supabaseUrl,
-    supabaseKey,
-    {
-      cookies: {
-        get(name) {
-          const cookie = cookieStore.get(name)
-          return cookie?.value
+  // Erstellen des Server-Clients mit verbessertem Cookie-Handling
+  try {
+    return createServerClient(
+      supabaseUrl,
+      supabaseKey,
+      {
+        cookies: {
+          get(name) {
+            const cookie = cookieStore.get(name)
+            return cookie?.value
+          },
+          set(name, value, options) {
+            try {
+              cookieStore.set({ name, value, ...options })
+            } catch (error) {
+              // In einigen Next.js-Kontexten dürfen keine Cookies gesetzt werden
+              console.error(`Cookie '${name}' konnte nicht gesetzt werden:`, error.message)
+            }
+          },
+          remove(name, options) {
+            try {
+              cookieStore.set({ 
+                name, 
+                value: '', 
+                maxAge: 0,
+                ...options 
+              })
+            } catch (error) {
+              console.error(`Cookie '${name}' konnte nicht entfernt werden:`, error.message)
+            }
+          },
         },
-        set(name, value, options) {
-          try {
-            cookieStore.set({ name, value, ...options })
-          } catch (error) {
-            // Next.js Server Components können in bestimmten Kontexten keine Cookies setzen
-            // Wir fangen den Fehler ab, um die Anwendung nicht abstürzen zu lassen
-            console.error('Fehler beim Setzen von Cookies:', error)
-          }
-        },
-        remove(name, options) {
-          try {
-            cookieStore.set({ name, value: '', ...options })
-          } catch (error) {
-            console.error('Fehler beim Entfernen von Cookies:', error)
-          }
-        },
-      },
-    }
-  )
+      }
+    )
+  } catch (error) {
+    console.error('Fehler bei der Erstellung des Server-Clients:', error)
+    throw error
+  }
 }
 
-// Funktion zum Abrufen des aktuellen Benutzers
+/**
+ * Hilfsfunktion zum Abrufen des aktuellen Benutzers (serverseitig)
+ */
 export async function getCurrentUser() {
-  const supabase = await createClient()
-  
   try {
-    const { data: { user }, error } = await supabase.auth.getUser()
+    const supabase = await createClient()
+    const { data, error } = await supabase.auth.getUser()
     
     if (error) {
-      console.error('Fehler beim Abrufen des Benutzers:', error)
+      console.error('Fehler beim Abrufen des Benutzers (Server):', error)
       return null
     }
     
-    return user
+    return data.user
   } catch (error) {
-    console.error('Unerwarteter Fehler beim Abrufen des Benutzers:', error)
+    console.error('Unerwarteter Fehler bei getCurrentUser (Server):', error)
     return null
   }
 }
 
-// Funktion zum Abrufen von Benutzerprofildaten
+/**
+ * Hilfsfunktion zum Abrufen der aktuellen Sitzung (serverseitig)
+ */
+export async function getSession() {
+  try {
+    const supabase = await createClient()
+    const { data, error } = await supabase.auth.getSession()
+    
+    if (error) {
+      console.error('Fehler beim Abrufen der Sitzung (Server):', error)
+      return null
+    }
+    
+    return data.session
+  } catch (error) {
+    console.error('Unerwarteter Fehler bei getSession (Server):', error)
+    return null
+  }
+}
+
+/**
+ * Hilfsfunktion zum Abrufen von Benutzerprofildaten
+ */
 export async function getUserProfile(userId) {
-  const supabase = await createClient()
+  if (!userId) {
+    console.error('getUserProfile: Keine Benutzer-ID angegeben')
+    return null
+  }
   
   try {
+    const supabase = await createClient()
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -91,32 +127,31 @@ export async function getUserProfile(userId) {
   }
 }
 
-// Funktion zum Abrufen von Lieblingsfächern eines Benutzers
-export async function getUserFavoriteSubjects(userId) {
-  const supabase = await createClient()
+/**
+ * Hilfsfunktion zur Profilaktualisierung
+ */
+export async function updateProfile(userId, profileData) {
+  if (!userId) {
+    console.error('updateProfile: Keine Benutzer-ID angegeben')
+    return { success: false, error: 'Keine Benutzer-ID' }
+  }
   
   try {
+    const supabase = await createClient()
     const { data, error } = await supabase
-      .from('user_favorite_subjects')
-      .select(`
-        subject_id,
-        subjects (
-          id,
-          name,
-          degree_type,
-          duration
-        )
-      `)
-      .eq('user_id', userId)
+      .from('profiles')
+      .update(profileData)
+      .eq('id', userId)
+      .select()
     
     if (error) {
-      console.error('Fehler beim Abrufen der Lieblingsfächer:', error)
-      return []
+      console.error('Fehler beim Aktualisieren des Profils:', error)
+      return { success: false, error: error.message }
     }
     
-    return data.map(item => item.subjects)
+    return { success: true, data }
   } catch (error) {
-    console.error('Unerwarteter Fehler beim Abrufen der Lieblingsfächer:', error)
-    return []
+    console.error('Unerwarteter Fehler beim Aktualisieren des Profils:', error)
+    return { success: false, error: error.message }
   }
 }

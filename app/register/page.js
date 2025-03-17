@@ -1,3 +1,4 @@
+// app/register/page.js
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -59,6 +60,9 @@ export default function Register() {
       try {
         setLoadingSubjects(true);
         setConnectionError(false);
+        
+        // Füge ein kurzes Timeout hinzu, um sicherzustellen, dass der Supabase-Client bereit ist
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         const { data, error } = await supabase
           .from('subjects')
@@ -123,7 +127,7 @@ export default function Register() {
       return;
     }
     
-    if (selectedSubjects.length === 0) {
+    if (selectedSubjects.length === 0 && currentStep === 3) {
       setError('Bitte wähle mindestens ein Studienfach aus.');
       return;
     }
@@ -131,6 +135,11 @@ export default function Register() {
     try {
       setLoading(true);
       setError(null);
+
+      // Verbesserte Validierung
+      if (data.password !== data.confirmPassword) {
+        throw new Error('Die Passwörter stimmen nicht überein.');
+      }
 
       // 1. Registriere den Benutzer bei Supabase mit Metadaten
       const { success, data: authData, error: signUpError } = await signUp(
@@ -144,7 +153,7 @@ export default function Register() {
       );
 
       if (!success) {
-        throw signUpError;
+        throw signUpError || new Error('Registrierung fehlgeschlagen');
       }
       
       if (!authData?.user) {
@@ -153,19 +162,24 @@ export default function Register() {
       
       const userId = authData.user.id;
 
-      // 2. Füge die Lieblingsfächer hinzu, wenn der Benutzer bereits authentifiziert ist
+      // 2. Wenn eine Sitzung vorhanden ist (automatische Anmeldung), fügen wir die Lieblingsfächer hinzu
       if (authData.session) {
-        for (const subjectId of selectedSubjects) {
-          const { error: favoriteError } = await supabase
-            .from('user_favorite_subjects')
-            .insert({
-              user_id: userId,
-              subject_id: subjectId
-            });
-            
-          if (favoriteError) {
-            console.error(`Fehler beim Hinzufügen des Fachs ${subjectId}:`, favoriteError);
-          }
+        // Verwenden wir Promise.all, um alle Einfügungen parallel zu machen
+        try {
+          const favoritePromises = selectedSubjects.map(subjectId => 
+            supabase
+              .from('user_favorite_subjects')
+              .insert({
+                user_id: userId,
+                subject_id: subjectId
+              })
+          );
+          
+          // Warte auf alle Einfügungen
+          await Promise.all(favoritePromises);
+        } catch (favoriteError) {
+          console.error('Fehler beim Hinzufügen der Lieblingsfächer:', favoriteError);
+          // Fehler hier nicht werfen, da die Registrierung bereits erfolgreich ist
         }
       }
       
@@ -175,11 +189,15 @@ export default function Register() {
     } catch (error) {
       console.error('Registration error:', error);
       
+      let errorMessage = 'Bei der Registrierung ist ein Fehler aufgetreten.';
+      
       if (error.message?.includes('already registered')) {
-        setError('Diese E-Mail-Adresse ist bereits registriert. Bitte melde dich an oder nutze die Passwort-Vergessen-Funktion.');
-      } else {
-        setError(error.message || 'Bei der Registrierung ist ein Fehler aufgetreten.');
+        errorMessage = 'Diese E-Mail-Adresse ist bereits registriert. Bitte melde dich an oder nutze die Passwort-Vergessen-Funktion.';
+      } else if (error.message) {
+        errorMessage = error.message;
       }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

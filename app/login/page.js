@@ -1,3 +1,4 @@
+// app/login/page.js
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -11,6 +12,7 @@ export default function Login() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirectTo') || '/swipe';
+  const errorParam = searchParams.get('error');
   const { signIn, isAuthenticated, loading: authLoading } = useAuth();
   
   // State management
@@ -35,13 +37,23 @@ export default function Login() {
     if (isAuthenticated) {
       router.push(redirectTo);
     }
-  }, [isAuthenticated, redirectTo, router]);
+    
+    // Fehlerparameter prüfen
+    if (errorParam === 'session_expired') {
+      setError('Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.');
+    }
+  }, [isAuthenticated, redirectTo, router, errorParam]);
 
   // Handle login submission
   const onSubmit = async (data) => {
     try {
       setLoading(true);
       setError(null);
+      
+      // Validierung auf Client-Seite hinzufügen
+      if (!data.email || !data.password) {
+        throw new Error('Bitte gib deine E-Mail-Adresse und dein Passwort ein.');
+      }
       
       const { success, error: loginError } = await signIn(data.email, data.password);
       
@@ -61,8 +73,10 @@ export default function Login() {
         errorMessage = 'Deine E-Mail-Adresse wurde noch nicht bestätigt. Bitte überprüfe deinen Posteingang.';
       } else if (err.message?.includes('Invalid login credentials')) {
         errorMessage = 'Ungültige Anmeldedaten. Bitte überprüfe deine E-Mail-Adresse und dein Passwort.';
+      } else if (err.message?.includes('Invalid email')) {
+        errorMessage = 'Ungültige E-Mail-Adresse.';
       } else {
-        errorMessage = `Anmeldung fehlgeschlagen: ${err.message || 'Unbekannter Fehler'}`;
+        errorMessage = err.message || 'Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es später erneut.';
       }
       
       setError(errorMessage);

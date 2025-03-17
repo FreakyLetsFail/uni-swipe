@@ -1,148 +1,176 @@
 // utils/supabase/client.js
 import { createBrowserClient } from '@supabase/ssr'
 
-// Überprüfung der Umgebungsvariablen
-const getSupabaseUrl = () => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  if (!url) {
-    console.error('NEXT_PUBLIC_SUPABASE_URL ist nicht definiert')
-    return ''
-  }
-  return url
-}
-
-const getSupabaseAnonKey = () => {
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!key) {
-    console.error('NEXT_PUBLIC_SUPABASE_ANON_KEY ist nicht definiert')
-    return ''
-  }
-  return key
-}
-
-// Cache für den Supabase-Client
+// Globale Variable für den Client (wird nur einmal initialisiert)
 let supabaseClient = null
 
+/**
+ * Erstellt einen Supabase-Client für Client-seitigen Gebrauch
+ * oder gibt den bestehenden zurück, wenn er bereits initialisiert wurde
+ */
 export function createClient() {
-  // Wenn der Client bereits erstellt wurde, gib ihn zurück
   if (supabaseClient) {
     return supabaseClient
   }
   
-  const supabaseUrl = getSupabaseUrl()
-  const supabaseAnonKey = getSupabaseAnonKey()
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Supabase Umgebungsvariablen fehlen. Bitte überprüfe deine .env.local Datei.')
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('Fehlende Supabase-Umgebungsvariablen. Überprüfe deine .env Datei.')
+    throw new Error('Supabase Konfiguration fehlt')
   }
 
-  // Erstelle einen neuen Supabase-Client für den Browser mit den Projekt-Anmeldedaten
-  supabaseClient = createBrowserClient(supabaseUrl, supabaseAnonKey)
-  return supabaseClient
-}
-
-// Funktion zum Hinzufügen eines Lieblingsfachs
-export async function addFavoriteSubject(subjectId) {
-  const supabase = createClient()
-  
-  // Benutzer-ID abrufen
-  const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) {
-    throw new Error('Benutzer nicht authentifiziert')
-  }
-  
-  const { data, error } = await supabase
-    .from('user_favorite_subjects')
-    .insert({
-      user_id: user.id,
-      subject_id: subjectId
+  // Erstelle den Browser-Client mit verbessertem Error-Handling
+  try {
+    supabaseClient = createBrowserClient(supabaseUrl, supabaseKey)
+    
+    // Event-Listener für Auth-Statusänderungen
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      console.log(`Auth-Status geändert: ${event}`, session ? 'Benutzer angemeldet' : 'Nicht angemeldet')
+      
+      // Bei Sign-Out müssen wir explizit lokalen Speicher und Sitzung bereinigen
+      if (event === 'SIGNED_OUT') {
+        // In manchen Fällen kann es hilfreich sein, den Client neu zu erstellen
+        supabaseClient = null
+      }
     })
-    .select()
     
-  if (error) {
-    console.error('Fehler beim Hinzufügen des Lieblingsfachs:', error)
+    return supabaseClient
+  } catch (error) {
+    console.error('Fehler bei der Supabase-Client-Initialisierung:', error)
     throw error
   }
-  
-  return data
 }
 
-// Funktion zum Entfernen eines Lieblingsfachs
-export async function removeFavoriteSubject(subjectId) {
-  const supabase = createClient()
-  
-  // Benutzer-ID abrufen
-  const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) {
-    throw new Error('Benutzer nicht authentifiziert')
-  }
-  
-  const { data, error } = await supabase
-    .from('user_favorite_subjects')
-    .delete()
-    .eq('user_id', user.id)
-    .eq('subject_id', subjectId)
-    
-  if (error) {
-    console.error('Fehler beim Entfernen des Lieblingsfachs:', error)
-    throw error
-  }
-  
-  return data
-}
-
-// Funktion zum Aktualisieren des Benutzerprofils
-export async function updateUserProfile(profileData) {
-  const supabase = createClient()
-  
-  // Benutzer-ID abrufen
-  const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) {
-    throw new Error('Benutzer nicht authentifiziert')
-  }
-  
-  const { data, error } = await supabase
-    .from('profiles')
-    .update(profileData)
-    .eq('id', user.id)
-    .select()
-    
-  if (error) {
-    console.error('Fehler beim Aktualisieren des Profils:', error)
-    throw error
-  }
-  
-  return data
-}
-
-// Funktion zum Überprüfen des Authentifizierungsstatus
-export async function checkAuthStatus() {
+/**
+ * Hilfsfunktion, um den aktuellen Benutzer zu erhalten
+ * mit verbesserter Fehlerbehandlung
+ */
+export async function getCurrentUser() {
   const supabase = createClient()
   
   try {
-    // Sitzungsinformationen abrufen
-    const { data: { session } } = await supabase.auth.getSession()
+    const { data, error } = await supabase.auth.getUser()
     
-    // Benutzerinformationen abrufen, falls eine Sitzung besteht
-    const { data: { user } } = session 
-      ? await supabase.auth.getUser() 
-      : { data: { user: null } }
-    
-    return {
-      isAuthenticated: !!session,
-      session,
-      user,
+    if (error) {
+      console.error('Fehler beim Abrufen des Benutzers:', error)
+      return null
     }
+    
+    return data.user
   } catch (error) {
-    console.error('Auth Status Check fehlgeschlagen:', error)
-    return {
-      isAuthenticated: false,
-      session: null,
-      user: null,
-      error,
+    console.error('Unerwarteter Fehler beim Abrufen des Benutzers:', error)
+    return null
+  }
+}
+
+/**
+ * Manuelles Aktualisieren der Sitzung, falls nötig
+ */
+export async function refreshSession() {
+  const supabase = createClient()
+  
+  try {
+    const { data, error } = await supabase.auth.refreshSession()
+    
+    if (error) {
+      console.error('Fehler beim Aktualisieren der Sitzung:', error)
+      return null
     }
+    
+    return data.session
+  } catch (error) {
+    console.error('Unerwarteter Fehler beim Aktualisieren der Sitzung:', error)
+    return null
+  }
+}
+
+/**
+ * Hilfsfunktion für die Anmeldung mit E-Mail und Passwort
+ */
+export async function signInWithEmail(email, password) {
+  const supabase = createClient()
+  
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    })
+    
+    if (error) throw error
+    
+    return { success: true, data }
+  } catch (error) {
+    console.error('Anmeldungsfehler:', error)
+    
+    // Verbesserte Fehlerbehandlung mit relevanten Fehlermeldungen
+    let errorMessage = 'Anmeldung fehlgeschlagen'
+    
+    if (error.message?.includes('Email not confirmed')) {
+      errorMessage = 'Deine E-Mail-Adresse wurde noch nicht bestätigt. Bitte überprüfe deinen Posteingang.'
+    } else if (error.message?.includes('Invalid login credentials')) {
+      errorMessage = 'Ungültige Anmeldedaten. Bitte überprüfe deine E-Mail-Adresse und dein Passwort.'
+    } else if (error.message?.includes('Invalid email')) {
+      errorMessage = 'Ungültige E-Mail-Adresse.'
+    } else {
+      errorMessage = `Anmeldung fehlgeschlagen: ${error.message}`
+    }
+    
+    return { success: false, error: errorMessage, originalError: error }
+  }
+}
+
+/**
+ * Hilfsfunktion für die Registrierung
+ */
+export async function signUp(email, password, metadata = {}) {
+  const supabase = createClient()
+  
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: metadata,
+      }
+    })
+    
+    if (error) throw error
+    
+    return { success: true, data }
+  } catch (error) {
+    console.error('Registrierungsfehler:', error)
+    
+    let errorMessage = 'Registrierung fehlgeschlagen'
+    
+    if (error.message?.includes('already registered')) {
+      errorMessage = 'Diese E-Mail-Adresse ist bereits registriert. Bitte melde dich an oder nutze die Passwort-Vergessen-Funktion.'
+    } else {
+      errorMessage = `Registrierung fehlgeschlagen: ${error.message}`
+    }
+    
+    return { success: false, error: errorMessage, originalError: error }
+  }
+}
+
+/**
+ * Hilfsfunktion für die Abmeldung
+ */
+export async function signOut() {
+  const supabase = createClient()
+  
+  try {
+    const { error } = await supabase.auth.signOut()
+    
+    if (error) throw error
+    
+    // Setze den Client zurück
+    supabaseClient = null
+    
+    return { success: true }
+  } catch (error) {
+    console.error('Abmeldungsfehler:', error)
+    return { success: false, error: error.message, originalError: error }
   }
 }

@@ -1,12 +1,19 @@
 // context/AuthContext.js
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
-import { createClient } from '@/utils/supabase/client';
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { 
+  createClient, 
+  getCurrentUser as getUser,
+  signInWithEmail,
+  signUp as registerUser,
+  signOut as logout,
+  refreshSession
+} from '@/utils/supabase/client';
 
 // Auth Kontext erstellen
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -26,8 +33,19 @@ export function AuthProvider({ children }) {
         
         // Benutzerinformationen setzen, falls eine Sitzung besteht
         if (session) {
-          const { data: { user: currentUser } } = await supabase.auth.getUser();
-          setUser(currentUser);
+          const userData = await getUser();
+          setUser(userData);
+          
+          // Überprüfen, ob der Token bald abläuft (< 10 Minuten)
+          const expiresAt = session.expires_at;
+          const now = Math.floor(Date.now() / 1000);
+          const tenMinutesInSeconds = 10 * 60;
+          
+          if (expiresAt - now < tenMinutesInSeconds) {
+            // Token refreshen, wenn er bald abläuft
+            console.log('Token läuft bald ab, refreshing...');
+            await refreshSession();
+          }
         } else {
           setUser(null);
         }
@@ -46,11 +64,12 @@ export function AuthProvider({ children }) {
       async (event, newSession) => {
         console.log('Auth state changed:', event);
         
-        if (newSession) {
-          // Benutzerdaten aktualisieren, wenn eine neue Session vorhanden ist
-          const { data: { user: newUser } } = await supabase.auth.getUser();
-          setUser(newUser);
-        } else {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if (newSession) {
+            const userData = await getUser();
+            setUser(userData);
+          }
+        } else if (event === 'SIGNED_OUT') {
           setUser(null);
         }
       }
@@ -63,61 +82,62 @@ export function AuthProvider({ children }) {
   }, [router]);
 
   // Login Funktion
-  const signIn = async (email, password) => {
+  const signIn = useCallback(async (email, password) => {
     try {
       setLoading(true);
       setError(null);
       
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const result = await signInWithEmail(email, password);
       
-      if (error) throw error;
+      if (!result.success) {
+        throw new Error(result.error);
+      }
       
-      return { success: true, data };
+      // Da onAuthStateChange den User aktualisieren wird, müssen wir ihn nicht explizit setzen
+      return { success: true, data: result.data };
     } catch (err) {
       console.error('Login fehlgeschlagen:', err);
-      setError(err);
+      setError(err.message || 'Login fehlgeschlagen');
       return { success: false, error: err };
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Registrierung Funktion
-  const signUp = async (email, password, metadata = {}) => {
+  const signUp = useCallback(async (email, password, metadata = {}) => {
     try {
       setLoading(true);
       setError(null);
       
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: metadata,
-        }
-      });
+      const result = await registerUser(email, password, metadata);
       
-      if (error) throw error;
+      if (!result.success) {
+        throw new Error(result.error);
+      }
       
-      return { success: true, data };
+      return { success: true, data: result.data };
     } catch (err) {
       console.error('Registrierung fehlgeschlagen:', err);
-      setError(err);
+      setError(err.message || 'Registrierung fehlgeschlagen');
       return { success: false, error: err };
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Logout Funktion
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     try {
       setLoading(true);
-      const { error } = await supabase.auth.signOut();
+      const result = await logout();
       
-      if (error) throw error;
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      
+      // Da onAuthStateChange den User aktualisieren wird, müssen wir ihn nicht explizit setzen
+      setUser(null);
       
       // Nach erfolgreichem Logout zur Login-Seite weiterleiten
       router.push('/login');
@@ -125,15 +145,35 @@ export function AuthProvider({ children }) {
       return { success: true };
     } catch (err) {
       console.error('Logout fehlgeschlagen:', err);
-      setError(err);
+      setError(err.message || 'Logout fehlgeschlagen');
       return { success: false, error: err };
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
+
+  // Manuelle Token-Aktualisierung (falls nötig)
+  const refreshToken = useCallback(async () => {
+    try {
+      setLoading(true);
+      const session = await refreshSession();
+      
+      if (!session) {
+        throw new Error('Token konnte nicht aktualisiert werden');
+      }
+      
+      return { success: true, session };
+    } catch (err) {
+      console.error('Token-Aktualisierung fehlgeschlagen:', err);
+      setError(err.message || 'Token-Aktualisierung fehlgeschlagen');
+      return { success: false, error: err };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // Profil-Update Funktion
-  const updateProfile = async (profileData) => {
+  const updateProfile = useCallback(async (profileData) => {
     try {
       setLoading(true);
       
@@ -145,20 +185,19 @@ export function AuthProvider({ children }) {
         .from('profiles')
         .update(profileData)
         .eq('id', user.id)
-        .select()
-        .single();
+        .select();
       
       if (error) throw error;
       
       return { success: true, data };
     } catch (err) {
       console.error('Profil-Update fehlgeschlagen:', err);
-      setError(err);
+      setError(err.message || 'Profil-Update fehlgeschlagen');
       return { success: false, error: err };
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   // Kontext-Werte
   const value = {
@@ -169,6 +208,7 @@ export function AuthProvider({ children }) {
     signUp,
     signOut,
     updateProfile,
+    refreshToken,
     isAuthenticated: !!user,
   };
 
