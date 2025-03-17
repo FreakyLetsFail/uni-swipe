@@ -1,5 +1,4 @@
 'use client';
-
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -17,23 +16,25 @@ export default function Profile() {
   const [savingSubjects, setSavingSubjects] = useState(false);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [degreeType, setDegreeType] = useState('');
+  const [preferredLocation, setPreferredLocation] = useState('');
+  const [radius, setRadius] = useState(50);
+
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
   const supabase = createClient();
 
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-
       if (!session) {
         router.push('/login');
         return;
       }
-
       setUser(session.user);
       await loadProfile(session.user.id);
       await loadSubjects(session.user.id);
     };
-
     checkUser();
   }, [router]);
 
@@ -44,11 +45,12 @@ export default function Profile() {
         .select('*')
         .eq('id', userId)
         .single();
-
       if (error) throw error;
-
       setProfile(data);
-      reset(data); // Formular mit Profildaten vorausfüllen
+      setDegreeType(data.degree_type || '');
+      setPreferredLocation(data.preferred_location || '');
+      setRadius(data.radius || 50);
+      reset(data);
     } catch (error) {
       console.error('Fehler beim Laden des Profils:', error);
     }
@@ -56,24 +58,19 @@ export default function Profile() {
 
   const loadSubjects = async (userId) => {
     try {
-      // Alle Fächer laden
       const { data: allSubjects, error: subjectsError } = await supabase
         .from('subjects')
         .select('*')
         .order('name');
-
       if (subjectsError) throw subjectsError;
 
-      // Favorisierte Fächer des Benutzers laden
       const { data: favorites, error: favoritesError } = await supabase
         .from('user_favorite_subjects')
         .select('subject_id')
         .eq('user_id', userId);
-
       if (favoritesError) throw favoritesError;
 
       const favoriteIds = favorites.map(fav => fav.subject_id);
-      
       setSubjects(allSubjects);
       setFavoriteSubjects(favoriteIds);
       setLoading(false);
@@ -83,53 +80,45 @@ export default function Profile() {
     }
   };
 
-  // Verbesserte toggleFavoriteSubject Funktion
   const toggleFavoriteSubject = async (subjectId) => {
     try {
       setSavingSubjects(true);
       setError(null);
-      
-      // Überprüfe den aktuellen Authentifizierungsstatus
+
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         console.error('Benutzer ist nicht authentifiziert');
         setError('Du musst angemeldet sein, um Lieblingsfächer zu verwalten');
         return;
       }
-      
+
       const userId = session.user.id;
       const isFavorite = favoriteSubjects.includes(subjectId);
-      
+
       if (isFavorite) {
-        // Favorit entfernen
         const { error } = await supabase
           .from('user_favorite_subjects')
           .delete()
           .eq('user_id', userId)
           .eq('subject_id', subjectId);
-          
         if (error) {
           console.error('Fehler beim Entfernen des Favoriten:', error);
           setError('Fehler beim Entfernen des Fachs: ' + error.message);
           return;
         }
-        
         setFavoriteSubjects(prev => prev.filter(id => id !== subjectId));
       } else {
-        // Favorit hinzufügen
         const { error } = await supabase
           .from('user_favorite_subjects')
           .insert({
             user_id: userId,
             subject_id: subjectId
           });
-          
         if (error) {
           console.error('Fehler beim Hinzufügen des Favoriten:', error);
           setError('Fehler beim Hinzufügen des Fachs: ' + error.message);
           return;
         }
-          
         setFavoriteSubjects(prev => [...prev, subjectId]);
       }
     } catch (error) {
@@ -147,14 +136,13 @@ export default function Profile() {
       const { error } = await supabase
         .from('profiles')
         .update({
-          full_name: data.full_name,
-          university: data.university,
-          bio: data.bio
+          ...data,
+          degree_type: degreeType,
+          preferred_location: preferredLocation,
+          radius: radius
         })
         .eq('id', user.id);
-
       if (error) throw error;
-
       setProfile(prev => ({...prev, ...data}));
       setEditing(false);
     } catch (error) {
@@ -182,6 +170,11 @@ export default function Profile() {
       </div>
     );
   }
+
+  // Filter subjects based on search term
+  const filteredSubjects = subjects.filter(subject => 
+    subject.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <div className="max-w-md mx-auto py-6 px-4">
@@ -222,7 +215,26 @@ export default function Profile() {
               <p className="text-red-500 text-sm mt-1">{errors.full_name.message}</p>
             )}
           </div>
-          
+
+          <div>
+            <label htmlFor="degreeType" className="block mb-1 font-medium">
+              Studiengang
+            </label>
+            <select
+              id="degreeType"
+              type="text"
+              className="input"
+              value={degreeType}
+              onChange={(e) => setDegreeType(e.target.value)}
+              {...register('degreeType')}
+            >
+              <option value="">Auswählen</option>
+              <option value="bachelor">Bachelor</option>
+              <option value="master">Master</option>
+              <option value="phd">Doktor</option>
+            </select>
+          </div>
+
           <div>
             <label htmlFor="university" className="block mb-1 font-medium">
               Aktuelle Universität (falls vorhanden)
@@ -234,7 +246,37 @@ export default function Profile() {
               {...register('university')}
             />
           </div>
-          
+
+          <div>
+            <label htmlFor="preferredLocation" className="block mb-1 font-medium">
+              Bevorzugte Stadt/Region
+            </label>
+            <input
+              id="preferredLocation"
+              type="text"
+              className="input"
+              value={preferredLocation}
+              onChange={(e) => setPreferredLocation(e.target.value)}
+              {...register('preferredLocation')}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="radius" className="block mb-1 font-medium">
+              Suchradius (km)
+            </label>
+            <input
+              id="radius"
+              type="number"
+              className="input"
+              min="10"
+              max="200"
+              value={radius}
+              onChange={(e) => setRadius(Number(e.target.value))}
+              {...register('radius')}
+            />
+          </div>
+
           <div>
             <label htmlFor="bio" className="block mb-1 font-medium">
               Über mich
@@ -246,7 +288,7 @@ export default function Profile() {
               {...register('bio')}
             />
           </div>
-          
+
           <div className="flex gap-2">
             <button
               type="submit"
@@ -260,6 +302,9 @@ export default function Profile() {
               onClick={() => {
                 setEditing(false);
                 reset(profile);
+                setDegreeType(profile.degree_type || '');
+                setPreferredLocation(profile.preferred_location || '');
+                setRadius(profile.radius || 50);
               }}
               className="button bg-gray-500 flex-1"
             >
@@ -278,12 +323,15 @@ export default function Profile() {
               <FaEdit size={18} />
             </button>
           </div>
-          
+
           <div className="space-y-2">
             <p><span className="font-medium">Name:</span> {profile.full_name || 'Nicht angegeben'}</p>
             <p><span className="font-medium">E-Mail:</span> {profile.email}</p>
             <p><span className="font-medium">Universität:</span> {profile.university || 'Nicht angegeben'}</p>
-            
+            <p><span className="font-medium">Studiengang:</span> {profile.degree_type || 'Nicht angegeben'}</p>
+            <p><span className="font-medium">Bevorzugte Stadt/Region:</span> {profile.preferred_location || 'Nicht angegeben'}</p>
+            <p><span className="font-medium">Suchradius:</span> {profile.radius || 50} km</p>
+
             {profile.bio && (
               <div>
                 <p className="font-medium">Über mich:</p>
@@ -296,10 +344,20 @@ export default function Profile() {
 
       <h2 className="text-xl font-semibold mb-3">Meine Lieblingsfächer</h2>
       <p className="text-gray-600 mb-4">Wähle die Fächer aus, die dich interessieren. Diese werden bei der Suche nach Universitäten berücksichtigt.</p>
-      
+
+      <div className="mb-4">
+        <input
+          type="text"
+          placeholder="Fach suchen..."
+          className="input w-full"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
       <div className="bg-white rounded-xl shadow p-4">
         <div className="space-y-2">
-          {subjects.map((subject) => (
+          {filteredSubjects.map((subject) => (
             <div 
               key={subject.id}
               className={`p-3 rounded-lg border flex justify-between items-center ${
@@ -321,13 +379,13 @@ export default function Profile() {
                     : 'bg-gray-200 text-gray-600'
                 }`}
               >
-                {favoriteSubjects.includes(subject.id) ? <FaCheck /> : <FaPlus />}
+                {favoriteSubjects.includes(subject.id) ? <FaCheck size={14} /> : <FaPlus size={14} />}
               </button>
             </div>
           ))}
         </div>
       </div>
-      
+
       <div className="mt-6">
         <Link href="/swipe" className="button w-full block text-center">
           Zurück zum Swipen
@@ -337,7 +395,6 @@ export default function Profile() {
   );
 }
 
-// Helfer-Komponente für Plus-Icon, damit wir es nicht importieren müssen
 function FaPlus(props) {
   return (
     <svg stroke="currentColor" fill="currentColor" strokeWidth="0" viewBox="0 0 448 512" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg" {...props}>

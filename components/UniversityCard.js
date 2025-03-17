@@ -45,14 +45,21 @@ const UniversityCard = ({ university, onSwipe, className = '', showDetails = fal
                 </span>
               )}
             </div>
-            <div className="flex justify-between items-center mt-2">
+            <div className="flex justify-between items-center mt-3">
               <span className="text-lg font-bold flex items-center">
                 <FaStar className="text-yellow-400 mr-1" /> {university.ratings?.toFixed(1) || '?'}
               </span>
-              {university.matchScore && (
-                <span className="text-sm bg-accent/80 rounded-full px-2 py-1">
-                  {Math.round((university.matchScore / university.totalMatches) * 100)}% Match
-                </span>
+              {university.matchScore !== undefined && (
+                <div>
+                  <span className="text-sm bg-accent/80 rounded-full px-2 py-1">
+                    {Math.round((university.matchScore / university.totalMatches) * 100)}% Match
+                  </span>
+                  {university.matchScore > 0 && (
+                    <span className="text-xs ml-1 text-gray-300">
+                      ({university.matchScore} Fächer)
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -80,17 +87,25 @@ const UniversityCard = ({ university, onSwipe, className = '', showDetails = fal
                   key={subject.id} 
                   className={`py-3 px-3 rounded-lg ${subject.isUserFavorite ? 'bg-accent/20 border border-accent' : 'bg-gray-800'}`}
                 >
-                  <div className="flex items-center">
+                  <div className="flex items-center flex-wrap gap-2">
                     <h4 className="font-medium">{subject.name}</h4>
+                    <span className="text-xs bg-gray-700 rounded-full px-2 py-1">
+                      {subject.degree_type}
+                    </span>
+                    <span className="text-xs bg-gray-700 rounded-full px-2 py-1">
+                      {subject.duration} Semester
+                    </span>
                     {subject.isUserFavorite && (
-                      <span className="ml-2 text-xs bg-accent rounded-full px-2 py-1">Lieblingsfach</span>
+                      <span className="text-xs bg-accent rounded-full px-2 py-1">Lieblingsfach</span>
                     )}
                   </div>
                   {subject.unique_features && (
-                    <p className="text-sm mt-1">{subject.unique_features}</p>
+                    <p className="text-sm mt-2 text-gray-200">{subject.unique_features}</p>
                   )}
                   {subject.entry_requirements && (
-                    <p className="text-sm text-gray-300 mt-1">Zulassung: {subject.entry_requirements}</p>
+                    <p className="text-sm text-gray-300 mt-1">
+                      <span className="font-medium">Zulassung:</span> {subject.entry_requirements}
+                    </p>
                   )}
                 </div>
               ))}

@@ -1,17 +1,14 @@
 // app/register/page.js
 'use client';
-
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import Link from 'next/link';
-import { FaArrowLeft, FaUser, FaEnvelope, FaLock, FaSchool, FaEye, FaEyeSlash, FaCheck, FaExclamationTriangle, FaSync } from 'react-icons/fa';
+import { FaArrowLeft, FaUser, FaEnvelope, FaLock, FaSchool, FaEye, FaEyeSlash, FaCheck, FaExclamationTriangle, FaSync, FaMapMarkerAlt, FaGraduationCap, FaRuler } from 'react-icons/fa';
 import { useAuth } from '@/context/AuthContext';
 import { createClient } from '@/utils/supabase/client';
-
 // Debug Flag - auf false setzen für Production
 const DEBUG_MODE = true;
-
 export default function Register() {
   const router = useRouter();
   const { signUp, isAuthenticated, loading: authLoading } = useAuth();
@@ -30,6 +27,23 @@ export default function Register() {
   const [connectionError, setConnectionError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [connectionStatus, setConnectionStatus] = useState('initializing');
+  
+  // Profilfelder
+  const [degreeType, setDegreeType] = useState('');
+  const [preferredLocation, setPreferredLocation] = useState('');
+  const [radius, setRadius] = useState(50);
+  const [searchType, setSearchType] = useState(''); // Bachelor, Master, Doktor oder Ausbildung
+  
+  // Zurücksetzen der ausgewählten Fächer bei Änderung der Filter
+  useEffect(() => {
+    if (searchType || degreeType) {
+      // Nur zurücksetzen, wenn wir bereits Fächer ausgewählt hatten
+      if (selectedSubjects.length > 0) {
+        setSelectedSubjects([]);
+        if (DEBUG_MODE) console.log('Ausgewählte Fächer zurückgesetzt aufgrund von Filteränderungen');
+      }
+    }
+  }, [searchType, degreeType]);
   
   // React Hook Form setup
   const { 
@@ -51,7 +65,6 @@ export default function Register() {
   });
   
   const password = watch('password');
-
   // Initialisierung von Supabase
   useEffect(() => {
     const initSupabase = async () => {
@@ -68,10 +81,8 @@ export default function Register() {
         setConnectionError(true);
       }
     };
-
     initSupabase();
   }, []);
-
   // Weiterleitung, wenn der Benutzer bereits angemeldet ist
   useEffect(() => {
     if (isAuthenticated) {
@@ -79,29 +90,44 @@ export default function Register() {
       router.push('/swipe');
     }
   }, [isAuthenticated, router]);
-
-  // Lade verfügbare Studienfächer
+  // Lade verfügbare Studienfächer, gefiltert nach dem gewählten Studiengangstyp und der Fachrichtung
   useEffect(() => {
     const loadSubjects = async () => {
       if (!supabase) {
         if (DEBUG_MODE) console.log('Supabase Client noch nicht initialisiert, überspringe Laden der Fächer');
         return;
       }
-
       try {
         setLoadingSubjects(true);
         setConnectionError(false);
         
         if (DEBUG_MODE) console.log('Starte Laden der Studienfächer, Versuch #', retryCount + 1);
+        if (DEBUG_MODE) console.log('Filter: searchType=', searchType, ', degreeType=', degreeType);
         
         // Längerer Timeout für sicheres Laden
         await new Promise(resolve => setTimeout(resolve, 500));
         
         if (DEBUG_MODE) console.log('Führe Datenbankabfrage aus...');
-        const { data, error } = await supabase
+        
+        let query = supabase
           .from('subjects')
-          .select('*')
-          .order('name');
+          .select('*');
+        
+        // Filtern nach Studiengangstyp (searchType) anhand des degree_type im Schema
+        if (searchType) {
+          if (searchType === 'bachelor') {
+            query = query.eq('degree_type', 'Bachelor');
+          } else if (searchType === 'master') {
+            query = query.eq('degree_type', 'Master');
+          } else if (searchType === 'phd') {
+            query = query.ilike('degree_type', '%Doktor%');
+          } else if (searchType === 'apprenticeship') {
+            query = query.or('degree_type.ilike.%Ausbildung%,degree_type.ilike.%Berufs%');
+          }
+        }
+        
+        // Sortieren nach Name
+        const { data, error } = await query.order('name');
           
         if (DEBUG_MODE) console.log('Datenbankabfrage abgeschlossen', { data: !!data, error });
           
@@ -112,14 +138,82 @@ export default function Register() {
         }
         
         if (!data || data.length === 0) {
-          console.error('Keine Fächer in der Datenbank gefunden');
-          if (DEBUG_MODE) console.log('Datenbank-Response:', data);
-          setConnectionError(true);
-          throw new Error('Keine Fächer gefunden');
+          if (DEBUG_MODE) {
+            console.log('Keine passenden Fächer gefunden mit den aktuellen Filtern');
+            console.log('Versuche Laden ohne Filter...');
+          }
+          
+          // Fallback: Versuche alle Fächer zu laden, wenn keine passenden gefunden wurden
+          const { data: allData, error: allError } = await supabase
+            .from('subjects')
+            .select('*')
+            .order('name');
+            
+          if (allError) {
+            console.error('Fehler bei der Datenbankverbindung:', allError);
+            setConnectionError(true);
+            throw allError;
+          }
+          
+          if (!allData || allData.length === 0) {
+            console.error('Keine Fächer in der Datenbank gefunden');
+            setConnectionError(true);
+            throw new Error('Keine Fächer gefunden');
+          }
+          
+          if (DEBUG_MODE) console.log(`${allData.length} Fächer ohne Filter geladen`);
+          setSubjects(allData);
+        } else {
+          // Weitere Filterung basierend auf Fachrichtung (degreeType) in JavaScript
+          // Da die Datenbank nicht die Fachrichtung als separates Feld enthält
+          if (degreeType && data.length > 0) {
+            const filteredByField = data.filter(subject => {
+              const subjectName = subject.name.toLowerCase();
+              
+              switch(degreeType) {
+                case 'cs':
+                  return subjectName.includes('informatik') || subjectName.includes('computer') || 
+                         subjectName.includes('software') || subjectName.includes('it');
+                case 'engineering':
+                  return subjectName.includes('ingenieur') || subjectName.includes('technik') || 
+                         subjectName.includes('maschinenbau') || subjectName.includes('elektro');
+                case 'business':
+                  return subjectName.includes('wirtschaft') || subjectName.includes('management') || 
+                         subjectName.includes('betriebswirt') || subjectName.includes('finan');
+                case 'arts':
+                  return subjectName.includes('kunst') || subjectName.includes('musik') || 
+                         subjectName.includes('design') || subjectName.includes('literatur') ||
+                         subjectName.includes('geschichte') || subjectName.includes('sprach');
+                case 'science':
+                  return subjectName.includes('physik') || subjectName.includes('chemie') || 
+                         subjectName.includes('biologie') || subjectName.includes('mathematik');
+                case 'medicine':
+                  return subjectName.includes('medizin') || subjectName.includes('pharma') || 
+                         subjectName.includes('gesundheit') || subjectName.includes('pflege');
+                case 'law':
+                  return subjectName.includes('recht') || subjectName.includes('jura');
+                case 'social':
+                  return subjectName.includes('sozial') || subjectName.includes('psychologie') || 
+                         subjectName.includes('pädagogik') || subjectName.includes('politik');
+                case 'other':
+                  return true; // Alle Fächer anzeigen
+                default:
+                  return true;
+              }
+            });
+            
+            if (filteredByField.length > 0) {
+              if (DEBUG_MODE) console.log(`${filteredByField.length} Fächer nach Fachrichtung gefiltert`);
+              setSubjects(filteredByField);
+            } else {
+              if (DEBUG_MODE) console.log(`Keine Fächer nach Fachrichtung gefunden, zeige alle ${data.length} gefundenen Fächer`);
+              setSubjects(data);
+            }
+          } else {
+            if (DEBUG_MODE) console.log(`${data.length} passende Fächer erfolgreich geladen`);
+            setSubjects(data);
+          }
         }
-        
-        if (DEBUG_MODE) console.log(`${data.length} Fächer erfolgreich geladen`);
-        setSubjects(data);
       } catch (error) {
         console.error('Fehler beim Laden der Fächer:', error);
         setConnectionError(true);
@@ -138,15 +232,16 @@ export default function Register() {
       }
     };
     
-    loadSubjects();
-  }, [supabase, retryCount]);
-
+    // Lade Fächer neu, wenn searchType oder degreeType geändert werden
+    if (currentStep === 3) {
+      loadSubjects();
+    }
+  }, [supabase, retryCount, searchType, degreeType, currentStep]);
   // Manuelles Neuladen der Fächer
   const reloadSubjects = () => {
     if (DEBUG_MODE) console.log('Manuelles Neuladen der Fächer angefordert');
     setRetryCount(0); // Dies löst ein erneutes Laden aus
   };
-
   // Funktion zum Umschalten der Fächerauswahl
   const toggleSubject = (subjectId) => {
     setSelectedSubjects(prev => 
@@ -155,25 +250,38 @@ export default function Register() {
         : [...prev, subjectId]
     );
   };
-
   // Zum nächsten Registrierungsschritt gehen
   const nextStep = async () => {
-    const fieldsToValidate = currentStep === 1 
-      ? ['email', 'password', 'confirmPassword'] 
-      : ['fullName'];
+    // Validierung für Schritt 1: Kontodaten
+    if (currentStep === 1) {
+      const isStepValid = await trigger(['email', 'password', 'confirmPassword']);
+      if (isStepValid) {
+        setCurrentStep(prev => prev + 1);
+      }
+    }
+    // Validierung für Schritt 2: Persönliche Informationen
+    else if (currentStep === 2) {
+      const isStepValid = await trigger(['fullName']);
       
-    const isStepValid = await trigger(fieldsToValidate);
-    
-    if (isStepValid) {
+      if (!isStepValid) {
+        return;
+      }
+      
+      // Zusätzliche Validierung für searchType
+      if (!searchType) {
+        setError('Bitte wähle aus, wonach du suchst (Bachelor, Master, Doktor oder Ausbildung)');
+        return;
+      }
+      
+      // Feld zurücksetzen
+      setError(null);
       setCurrentStep(prev => prev + 1);
     }
   };
-
   // Zum vorherigen Registrierungsschritt zurückgehen
   const prevStep = () => {
     setCurrentStep(prev => prev - 1);
   };
-
   // Funktion für die Registrierung
   const onSubmit = async (data) => {
     if (connectionError) {
@@ -181,22 +289,24 @@ export default function Register() {
       return;
     }
     
-    if (selectedSubjects.length === 0 && currentStep === 3) {
+    if (selectedSubjects.length === 0 && currentStep === 3 && subjects.length > 0) {
       setError('Bitte wähle mindestens ein Studienfach aus.');
       return;
+    }
+    
+    // Wenn keine passenden Fächer gefunden wurden, kann der Benutzer ohne Fächerauswahl fortfahren
+    if (subjects.length === 0 && currentStep === 3) {
+      if (DEBUG_MODE) console.log('Keine Fächer zur Auswahl verfügbar, überspringe Validierung');
     }
     
     try {
       setLoading(true);
       setError(null);
-
       if (DEBUG_MODE) console.log('Starte Registrierungsprozess');
-
       // Verbesserte Validierung
       if (data.password !== data.confirmPassword) {
         throw new Error('Die Passwörter stimmen nicht überein.');
       }
-
       if (DEBUG_MODE) console.log('Sende Registrierungsdaten an Supabase Auth...');
       
       // 1. Registriere den Benutzer bei Supabase mit Metadaten
@@ -206,10 +316,13 @@ export default function Register() {
         {
           full_name: data.fullName,
           university: data.university,
-          bio: data.bio
+          bio: data.bio,
+          degree_type: degreeType,
+          search_type: searchType,
+          preferred_location: preferredLocation,
+          radius: radius
         }
       );
-
       if (!success) {
         throw signUpError || new Error('Registrierung fehlgeschlagen');
       }
@@ -221,7 +334,6 @@ export default function Register() {
       if (DEBUG_MODE) console.log('Registrierung erfolgreich, Benutzer-ID:', authData.user.id);
       
       const userId = authData.user.id;
-
       // 2. Wenn eine Sitzung vorhanden ist (automatische Anmeldung), fügen wir die Lieblingsfächer hinzu
       if (authData.session) {
         if (DEBUG_MODE) console.log('Sitzung gefunden, füge Lieblingsfächer hinzu:', selectedSubjects);
@@ -278,7 +390,6 @@ export default function Register() {
       setLoading(false);
     }
   };
-
   // Debug-Komponente - zeigt Informationen im Debug-Modus
   const DebugInfo = () => {
     if (!DEBUG_MODE) return null;
@@ -294,11 +405,14 @@ export default function Register() {
           <li>Authentifizierung lädt: {authLoading ? 'Ja' : 'Nein'}</li>
           <li>Benutzer angemeldet: {isAuthenticated ? 'Ja' : 'Nein'}</li>
           <li>Retry-Zähler: {retryCount}/3</li>
+          <li>Studiengangstyp: {searchType}</li>
+          <li>Studiengang: {degreeType}</li>
+          <li>Bevorzugte Stadt: {preferredLocation}</li>
+          <li>Suchradius: {radius} km</li>
         </ul>
       </div>
     );
   };
-
   // Zeige Ladeanzeige, wenn Auth-Provider noch lädt
   if (authLoading) {
     return (
@@ -307,33 +421,60 @@ export default function Register() {
       </div>
     );
   }
-
   // Erfolgsseite nach der Registrierung
   if (registrationSuccess) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-4">
-        <div className="animate-bounce mb-6">
-          <div className="w-20 h-20 rounded-full bg-accent flex items-center justify-center">
-            <FaCheck className="text-white text-4xl" />
+      <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gradient-to-b from-white to-accent/5">
+        <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
+          <div className="flex justify-center mb-6">
+            <div className="relative">
+              <div className="w-24 h-24 rounded-full bg-accent flex items-center justify-center animate-pulse">
+                <FaCheck className="text-white text-4xl" />
+              </div>
+              <div className="absolute -top-2 -right-2 w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                <FaCheck className="text-white" />
+              </div>
+            </div>
+          </div>
+          
+          <h1 className="text-3xl font-bold text-center mb-4">Willkommen bei UniSwipe!</h1>
+          
+          <div className="bg-accent/10 rounded-lg p-4 mb-6">
+            <h2 className="font-semibold text-accent mb-2">Nächste Schritte:</h2>
+            <ol className="list-decimal pl-5 space-y-2">
+              <li>Wir haben dir eine E-Mail mit einem Bestätigungslink gesendet.</li>
+              <li>Bitte öffne diese E-Mail und klicke auf den Bestätigungslink.</li>
+              <li>Nach der Bestätigung kannst du dich anmelden und UniSwipe nutzen.</li>
+            </ol>
+          </div>
+          
+          <p className="text-gray-600 text-center text-sm mb-6">
+            Wenn du keine E-Mail erhalten hast, überprüfe bitte deinen Spam-Ordner oder fordere eine neue Bestätigungs-E-Mail an.
+          </p>
+          
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => router.push('/login')}
+              className="button w-full flex items-center justify-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v7a1 1 0 11-2 0V4H4v16h12v-6a1 1 0 112 0v7a1 1 0 01-1 1H4a1 1 0 01-1-1V3z" clipRule="evenodd" />
+                <path fillRule="evenodd" d="M16.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-2-2a1 1 0 111.414-1.414L12 13.586l3.293-3.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+              Zum Login
+            </button>
+            
+            <button
+              onClick={() => router.push('/')}
+              className="text-accent underline text-center"
+            >
+              Zurück zur Startseite
+            </button>
           </div>
         </div>
-        <h1 className="text-3xl font-bold text-center mb-2">Registrierung erfolgreich!</h1>
-        <p className="text-gray-600 text-center mb-6">
-          Bitte bestätige deine E-Mail-Adresse. Wir haben dir einen Bestätigungslink gesendet.
-        </p>
-        <p className="text-gray-600 text-center mb-6">
-          Nach der Bestätigung kannst du dich anmelden und UniSwipe nutzen.
-        </p>
-        <button
-          onClick={() => router.push('/login')}
-          className="button"
-        >
-          Zum Login
-        </button>
       </div>
     );
   }
-
   // Verbindungsfehler zur Datenbank - Anzeigen eines Fehlerbildschirms
   if (connectionError) {
     return (
@@ -378,7 +519,6 @@ export default function Register() {
       </div>
     );
   }
-
   return (
     <div className="max-w-md mx-auto py-8 px-4">
       {/* Header */}
@@ -555,6 +695,61 @@ export default function Register() {
             </div>
             
             <div>
+              <label htmlFor="searchType" className="block mb-1 font-medium">
+                Wonach suchst du?
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: 'bachelor', label: 'Bachelor', icon: '🎓' },
+                  { id: 'master', label: 'Master', icon: '📚' },
+                  { id: 'phd', label: 'Doktor', icon: '🔬' },
+                  { id: 'apprenticeship', label: 'Ausbildung', icon: '🛠️' }
+                ].map((option) => (
+                  <div
+                    key={option.id}
+                    onClick={() => setSearchType(option.id)}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all text-center ${
+                      searchType === option.id
+                        ? 'border-accent bg-accent/10'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="text-2xl mb-1">{option.icon}</div>
+                    <div className="font-medium">{option.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div>
+              <label htmlFor="degreeType" className="block mb-1 font-medium">
+                Fachrichtung
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center">
+                  <FaGraduationCap className="text-gray-400" />
+                </div>
+                <select
+                  id="degreeType"
+                  className="input pl-10"
+                  value={degreeType}
+                  onChange={(e) => setDegreeType(e.target.value)}
+                >
+                  <option value="">Bitte auswählen</option>
+                  <option value="arts">Geisteswissenschaften</option>
+                  <option value="business">Wirtschaft</option>
+                  <option value="engineering">Ingenieurwesen</option>
+                  <option value="cs">Informatik</option>
+                  <option value="law">Jura</option>
+                  <option value="medicine">Medizin</option>
+                  <option value="science">Naturwissenschaften</option>
+                  <option value="social">Sozialwissenschaften</option>
+                  <option value="other">Andere</option>
+                </select>
+              </div>
+            </div>
+            
+            <div>
               <label htmlFor="university" className="block mb-1 font-medium">
                 Aktuelle Universität (falls vorhanden)
               </label>
@@ -569,6 +764,51 @@ export default function Register() {
                   placeholder="Optional"
                   {...register('university')}
                 />
+              </div>
+            </div>
+            
+            <div>
+              <label htmlFor="preferredLocation" className="block mb-1 font-medium">
+                Bevorzugte Stadt/Region
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center">
+                  <FaMapMarkerAlt className="text-gray-400" />
+                </div>
+                <input
+                  id="preferredLocation"
+                  type="text"
+                  className="input pl-10"
+                  placeholder="z.B. Berlin, München, ..."
+                  value={preferredLocation}
+                  onChange={(e) => setPreferredLocation(e.target.value)}
+                />
+              </div>
+              <p className="text-sm text-gray-500 mt-1">
+                Leer lassen, um überall zu suchen
+              </p>
+            </div>
+            
+            <div>
+              <label htmlFor="radius" className="block mb-1 font-medium">
+                Suchradius (km)
+              </label>
+              <div>
+                <input
+                  id="radius"
+                  type="range"
+                  min="10"
+                  max="500"
+                  step="10"
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  value={radius}
+                  onChange={(e) => setRadius(Number(e.target.value))}
+                />
+                <div className="flex justify-between text-xs text-gray-500 px-2">
+                  <span>10km</span>
+                  <span>{radius}km</span>
+                  <span>500km</span>
+                </div>
               </div>
             </div>
             
@@ -593,11 +833,45 @@ export default function Register() {
               Wähle die Fächer aus, die dich interessieren. Diese werden bei der Suche nach Universitäten berücksichtigt.
             </p>
             
+            {/* Anzeige der aktuellen Filter */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {searchType && (
+                <div className="bg-accent/10 text-accent text-sm py-1 px-3 rounded-full">
+                  {searchType === 'bachelor' && 'Bachelor'}
+                  {searchType === 'master' && 'Master'}
+                  {searchType === 'phd' && 'Doktor'}
+                  {searchType === 'apprenticeship' && 'Ausbildung'}
+                </div>
+              )}
+              {degreeType && (
+                <div className="bg-accent/10 text-accent text-sm py-1 px-3 rounded-full">
+                  {degreeType === 'arts' && 'Geisteswissenschaften'}
+                  {degreeType === 'business' && 'Wirtschaft'}
+                  {degreeType === 'engineering' && 'Ingenieurwesen'}
+                  {degreeType === 'cs' && 'Informatik'}
+                  {degreeType === 'law' && 'Jura'}
+                  {degreeType === 'medicine' && 'Medizin'}
+                  {degreeType === 'science' && 'Naturwissenschaften'}
+                  {degreeType === 'social' && 'Sozialwissenschaften'}
+                  {degreeType === 'other' && 'Andere'}
+                </div>
+              )}
+              <button 
+                onClick={() => {
+                  setCurrentStep(2);
+                  setError(null);
+                }}
+                className="text-accent text-sm underline"
+              >
+                Filter ändern
+              </button>
+            </div>
+            
             <div className="bg-white rounded-xl shadow p-4 max-h-[400px] overflow-y-auto">
               {loadingSubjects ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-accent mx-auto mb-2"></div>
-                  <p>Fächer werden geladen...</p>
+                  <p>Passende Fächer werden geladen...</p>
                   {retryCount > 0 && (
                     <p className="text-sm text-gray-500 mt-2">Versuch {retryCount}/3</p>
                   )}
@@ -617,7 +891,9 @@ export default function Register() {
                       <div className="flex justify-between items-center">
                         <div>
                           <p className="font-medium">{subject.name}</p>
-                          <p className="text-sm text-gray-600">{subject.degree_type}, {subject.duration} Semester</p>
+                          <p className="text-sm text-gray-600">
+                            {subject.degree_type} • {subject.duration} Semester
+                          </p>
                         </div>
                         <div 
                           className={`w-6 h-6 rounded-full flex items-center justify-center ${
@@ -635,17 +911,26 @@ export default function Register() {
               ) : (
                 <div className="text-center py-6">
                   <FaExclamationTriangle className="text-amber-500 text-3xl mx-auto mb-2" />
-                  <p className="font-medium">Keine Fächer verfügbar</p>
+                  <p className="font-medium">Keine passenden Fächer gefunden</p>
                   <p className="text-sm text-gray-600 mb-4">
-                    Die Fächer konnten nicht geladen werden.
+                    Es wurden keine Fächer gefunden, die deinen gewählten Filtern entsprechen.
                   </p>
-                  <button
-                    type="button"
-                    onClick={reloadSubjects}
-                    className="button bg-secondary inline-flex items-center"
-                  >
-                    <FaSync className="mr-2" /> Erneut versuchen
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(2)}
+                      className="button bg-secondary inline-flex items-center"
+                    >
+                      Filter anpassen
+                    </button>
+                    <button
+                      type="button"
+                      onClick={reloadSubjects}
+                      className="block w-full text-accent underline text-sm"
+                    >
+                      <FaSync className="inline mr-1" /> Erneut versuchen
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -654,6 +939,11 @@ export default function Register() {
               <p className="text-sm text-gray-600">
                 {selectedSubjects.length} {selectedSubjects.length === 1 ? 'Fach' : 'Fächer'} ausgewählt
               </p>
+              {subjects.length > 0 && (
+                <p className="text-sm text-gray-500 mt-1">
+                  {subjects.length} {subjects.length === 1 ? 'Fach passt' : 'Fächer passen'} zu deinen Filtern
+                </p>
+              )}
             </div>
           </div>
         )}
